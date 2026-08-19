@@ -32,7 +32,7 @@ const ctx = {
   provide(name, impl) { this[name] = impl },
   on(event, fn) { events[event] = fn },
   systemPrompt: {
-    add({ content, priority }) { promptParts.push({ content, priority }) },
+    section({ name, order, text }) { promptParts.push({ name, order, text }) },
   },
 }
 
@@ -57,8 +57,8 @@ assert('okf_read 已注册', !!byName.okf_read)
 assert('okf_forget 已注册', !!byName.okf_forget)
 
 // 系统提示
-assert('注入记忆纪律', promptParts.some((p) => p.content.includes('记忆纪律')))
-assert('注入库摘要', promptParts.some((p) => p.content.includes('OKF 记忆库')))
+assert('注入记忆纪律', promptParts.some((p) => (p.text || '').includes('记忆纪律')))
+assert('注入库摘要', promptParts.some((p) => (p.text || '').includes('OKF 记忆库')))
 
 // ── 通过工具 execute 走全链路 ──
 const remember = byName.okf_remember
