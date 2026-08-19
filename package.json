@@ -1,0 +1,33 @@
+{
+  "name": "dsh-okf-memory",
+  "version": "0.1.0",
+  "description": "会话记忆 → OKF 知识沉淀插件:预测驱动的神经自我学习记忆系统。把会话中高价值内容按 OKF v0.1 规范沉淀为长期记忆,跨会话自动唤起。Session-to-OKF memory plugin with neuro-self-learning (predictive recall, uncertainty-driven capture, reinforcement feedback).",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "okf",
+    "memory",
+    "knowledge",
+    "agent",
+    "memory-system"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZHI-QI/dsh-okf-memory.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0"
+  }
+}

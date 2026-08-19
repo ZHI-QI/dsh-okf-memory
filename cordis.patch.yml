@@ -1,0 +1,4 @@
+# dsh-okf-memory 挂载声明:把自己插入 Loader
+- insert:
+  - id: okf-memory
+    name: dsh-okf-memory
