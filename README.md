@@ -8,6 +8,8 @@
 
 **Session-to-OKF memory plugin with neuro-self-learning: predictive recall, uncertainty-driven capture, reinforcement feedback, consolidation & forgetting.**
 
+[![dshfind](https://dshfind.com/api/card/ZHI-QI/dsh-okf-memory?lang=zh)](https://dshfind.com/zh/plugins/ZHI-QI/dsh-okf-memory?ref=badge)
+
 ## 特性
 
 - **记忆四阶段闭环**:捕获 → 概念化 → 沉淀 → 唤起
@@ -24,6 +26,10 @@
 dsh plugin --profile web add dsh-okf-memory
 # 或从本地路径:
 dsh plugin --profile web add ./dsh-okf-memory
+# 或从 GitHub(拉取源码,需 prepare 构建并向用户授权构建):
+dsh plugin --profile web add github:ZHI-QI/dsh-okf-memory
+# 或发布到 npm 后免构建授权安装:
+dsh plugin --profile web add dsh-okf-memory
 ```
 
 插件零运行时依赖(peer 依赖 `@deepseek-ai/cordis` 由 dsh 运行时提供),安装即用,无需构建脚本。

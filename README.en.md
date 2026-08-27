@@ -6,6 +6,8 @@
 
 Turn high-value content from your conversations into persistent long-term memory, organized as [OKF v0.1](https://github.com/open-knowledge-format) knowledge documents. The agent gets smarter the more you use it — every selection, skip, and correction is a learning signal that updates memory weights.
 
+[![dshfind](https://dshfind.com/api/card/ZHI-QI/dsh-okf-memory?lang=en)](https://dshfind.com/zh/plugins/ZHI-QI/dsh-okf-memory?ref=badge)
+
 ## Features
 
 - **Four-stage memory loop**: Capture → Concept-ize (OKF) → Consolidate → Recall
@@ -22,6 +24,10 @@ Turn high-value content from your conversations into persistent long-term memory
 dsh plugin --profile web add dsh-okf-memory
 # Or from a local path:
 dsh plugin --profile web add ./dsh-okf-memory
+# Or from GitHub (pulls source; needs a prepare build + user build approval):
+dsh plugin --profile web add github:ZHI-QI/dsh-okf-memory
+# Or publish to npm and install without build approval:
+dsh plugin --profile web add dsh-okf-memory
 ```
 
 Zero runtime dependencies (peer dependency `@deepseek-ai/cordis` is provided by the dsh runtime). Install and use — no build step, no build-script approval needed.
