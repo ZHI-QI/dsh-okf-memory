@@ -144,6 +144,31 @@ let allIn = true
 for (const t of cTitles) if (!idx2.includes(`fact/${t}`)) { allIn = false; break }
 assert('并发 50 写全部入索引', allIn)
 
+// 15. frontmatter 增强(P1-6):flow 数组含逗号 tag 不拆、引号值、多行块
+const fm1 = concept.parseFrontmatter('---\ntype: Fact\ntitle: "含: 冒号的值"\ntags: ["门店,财务", 技术选型]\ndesc: >\n  多行\n  折叠\n---\n\nbody')
+assert('flow 数组含逗号 tag 不拆', Array.isArray(fm1.meta.tags) && fm1.meta.tags[0] === '门店,财务' && fm1.meta.tags[1] === '技术选型', JSON.stringify(fm1.meta))
+assert('引号值保留冒号', fm1.meta.title === '含: 冒号的值', JSON.stringify(fm1.meta.title))
+assert('多行块解析', fm1.meta.desc === '多行\n折叠', JSON.stringify(fm1.meta.desc))
+// 写侧:含逗号 tag 经 writeConcept 往返不拆坏
+await store.writeConcept(root,
+  { type: 'Fact', title: '逗号标签', description: '含逗号 tag 往返', tags: ['门店,财务', '普通'], timestamp: new Date().toISOString() },
+  '# 核心\n\n测试')
+const fmBack = concept.parseFrontmatter(await fs.readFile(path.join(root, 'fact', '逗号标签.md'), 'utf8'))
+assert('含逗号 tag 写读往返', Array.isArray(fmBack.meta.tags) && fmBack.meta.tags[0] === '门店,财务' && fmBack.meta.tags[1] === '普通', JSON.stringify(fmBack.meta.tags))
+
+// 16. 相似标题短词阈值(P1-7):「前端方案」存在时,新建「前端」不再被挡
+await store.writeConcept(root,
+  { type: 'TechChoice', title: '前端方案', description: '前端技术选型', tags: ['前端'], timestamp: new Date().toISOString() },
+  '## Options\n\n| 候选 | 状态 |\n|---|---|\n| React | active |')
+const simShort = await dedupe.findSimilarByTitle(root, '前端', 'TechChoice')
+assert('短词「前端」不命中「前端方案」', simShort.length === 0, JSON.stringify(simShort))
+const simLong = await dedupe.findSimilarByTitle(root, '前端方案', 'TechChoice')
+assert('完整标题精确命中', simLong.length === 1 && simLong[0].similarity === 1)
+
+// 17. index.md 带 description(P1-9)
+const idxWithDesc = await fs.readFile(path.join(root, 'index.md'), 'utf8')
+assert('index 行含 description', idxWithDesc.includes('— 前端技术选型'), idxWithDesc.slice(0, 400))
+
 console.log(`\n结果:${pass} 通过,${fail} 失败`)
 if (fail > 0) process.exit(1)
 console.log('记忆库内容:')

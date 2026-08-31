@@ -16,6 +16,7 @@ Turn high-value content from your conversations into persistent long-term memory
 - **Reinforcement feedback loop**: `score = relevance × weight × recency`; selecting a candidate raises its weight, skipping lowers it
 - **TechChoice memory**: frontend / backend / language / approach / config — one concept per dimension with an options table + active choice; three-tier selection rule (show all candidates, use the only candidate, or follow the matched dimension)
 - **Write permission gate**: type validity → dedup (complement, never duplicate, cross-link) → OKF compliance check
+- **P1 hardening**: enhanced frontmatter parsing (quotes / multi-line / comma-in-tag), short-title similarity threshold ("前端" no longer blocks "前端方案"), `index.md` rows carry descriptions for better "what's in the library" awareness, `service.preload()` predictive prefetch API, bilingual (zh/en) tool descriptions
 
 ## Install
 
