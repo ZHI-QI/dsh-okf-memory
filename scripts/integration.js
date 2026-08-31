@@ -89,6 +89,29 @@ assert('remember 创建 TechChoice', r.status === 'created' && r.conceptId === '
 r = await remember.execute({ title: '门店布局', type: 'Fact', content: '# 核心\n\n一句话。' })
 assert('重复标题走 skip/update', r.status === 'skipped' || r.status === 'updated', JSON.stringify(r))
 
+// 4b. 更新走小节合并(P0-5):覆盖核心、保留旧小节、追加新小节,不无限 ## 补充
+r = await remember.execute({
+  title: '门店布局', type: 'Fact',
+  content: '# 核心\n\n三家门店共用局域网共享文件夹(已更新)。\n\n## 库存\n- 韶山:100\n- 湘乡:50\n- 塘厦:30',
+})
+assert('长内容更新 → updated', r.status === 'updated', JSON.stringify(r))
+const mergedRd = await readTool.execute({ concept_id: 'fact/门店布局' })
+assert('合并覆盖同小节', mergedRd.body.includes('(已更新)'))
+assert('合并保留旧小节', mergedRd.body.includes('## 细节') && mergedRd.body.includes('韶山店'))
+assert('合并追加新小节', mergedRd.body.includes('## 库存'))
+assert('不再时间戳追加', !mergedRd.body.includes('## 补充('))
+
+// 4c. 非法 type 拒绝且不建污染目录(P0-4)
+r = await remember.execute({ title: '非法类型测试', type: 'not-a-type', content: '# 核心\n\nx' })
+assert('非法 type → error', r.status === 'error', JSON.stringify(r))
+let badTypeFile = true
+try { await fs.access(path.join(root, 'not-a-type', '非法类型测试.md')); badTypeFile = false } catch { /* 不应存在 */ }
+assert('非法类型不落盘', badTypeFile)
+
+// 4d. forget 不存在的概念 → not_found 不抛错(P0-3)
+const fgNF = await forgetTool.execute({ concept_id: 'fact/不存在' })
+assert('forget 不存在 → not_found', fgNF.status === 'not_found', JSON.stringify(fgNF))
+
 // 5. search
 let s = await searchTool.execute({ query: '门店' })
 assert('search 命中', s.count >= 1 && s.results[0].conceptId.includes('门店'), JSON.stringify(s))
@@ -108,6 +131,15 @@ const fg = await forgetTool.execute({ concept_id: 'fact/门店布局' })
 assert('forget 撤回', fg.status === 'forgotten')
 const s2 = await searchTool.execute({ query: '门店' })
 assert('forget 后检索不到', s2.count === 0, JSON.stringify(s2))
+
+// 8b. forget delete_file=true → 文件删除(P0-3)
+r = await remember.execute({ title: '待删概念', type: 'Fact', content: '# 核心\n\n将被删除。' })
+assert('创建待删概念', r.status === 'created', JSON.stringify(r))
+const fgDel = await forgetTool.execute({ concept_id: 'fact/待删概念', delete_file: true })
+assert('forget(删文件) → forgotten', fgDel.status === 'forgotten', JSON.stringify(fgDel))
+let fileGone = true
+try { await fs.access(path.join(root, 'fact', '待删概念.md')); fileGone = false } catch { /* 应已删除 */ }
+assert('文件已删除', fileGone)
 
 // 9. index/log 完整性
 const indexText = await fs.readFile(path.join(root, 'index.md'), 'utf8')

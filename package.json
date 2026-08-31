@@ -22,6 +22,9 @@
     "type": "git",
     "url": "https://github.com/ZHI-QI/dsh-okf-memory.git"
   },
+  "scripts": {
+    "test": "node scripts/smoke.js && node scripts/integration.js && node scripts/schema-check.js && node scripts/concurrency.js"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

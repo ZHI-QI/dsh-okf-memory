@@ -121,8 +121,11 @@ Default `~/.dsh/memory/` (overridable via `OKF_MEMORY_ROOT`):
 ## Development & Testing
 
 ```sh
-node scripts/smoke.js        # Core module functional tests (19 checks)
-node scripts/integration.js  # Mock dsh ctx integration tests (24 checks)
+npm test                      # Full suite (smoke + integration + schema + concurrency)
+node scripts/smoke.js         # Core module functional tests (incl. write-lock assertions)
+node scripts/integration.js   # Mock dsh ctx integration tests (incl. error paths)
+node scripts/schema-check.js  # Tool schema compliance
+node scripts/concurrency.js   # Write-lock stress test (50 parallel writes / 20 parallel feedbacks)
 ```
 
 ## License

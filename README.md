@@ -123,8 +123,11 @@ Agent: okf_search(query="查询数据库")
 ## 开发与测试
 
 ```sh
-node scripts/smoke.js        # 核心模块功能验证(19 项)
-node scripts/integration.js  # mock dsh ctx 集成验证(24 项)
+npm test                      # 全量测试(smoke + integration + schema + concurrency)
+node scripts/smoke.js         # 核心模块功能验证(含并发写锁断言)
+node scripts/integration.js   # mock dsh ctx 集成验证(含错误路径断言)
+node scripts/schema-check.js  # 工具 schema 合规
+node scripts/concurrency.js   # 写锁并发压测(50 并行写 / 20 并行反馈)
 ```
 
 ## License

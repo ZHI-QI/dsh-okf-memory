@@ -117,6 +117,33 @@ assert('符合性校验(无 frontmatter→fail)', check.ok === false)
 const check2 = concept.validateConcept('---\ntype: Fact\ntitle: X\n---\n\nbody')
 assert('符合性校验(合规→ok)', check2.ok === true)
 
+// 12. 类型归一化/校验(P0-4)
+assert('normalizeType 归一化大小写', concept.normalizeType('fact') === 'Fact' && concept.normalizeType('FAct') === 'Fact')
+let typeThrows = false
+try { concept.normalizeType('not-a-type') } catch { typeThrows = true }
+assert('normalizeType 未知类型抛错', typeThrows)
+try { concept.normalizeType('') } catch { typeThrows = true }
+assert('normalizeType 空类型抛错', typeThrows)
+
+// 13. 小节级合并(P0-5):同小节覆盖、旧小节保留、新小节追加,不无限 ## 补充
+const merged = concept.mergeConceptBodies(
+  '# 核心\n\n旧内容\n\n## 细节\n- 旧\n',
+  '# 核心\n\n新内容\n\n## 新增\n- 新\n',
+)
+assert('merge 覆盖同小节', merged.includes('# 核心\n\n新内容'))
+assert('merge 保留旧小节', merged.includes('## 细节'))
+assert('merge 追加新小节', merged.includes('## 新增'))
+assert('merge 不再时间戳追加', !merged.includes('## 补充('))
+
+// 14. 并发写不丢更新(P0-1):50 个并行写全部进索引
+const cTitles = Array.from({ length: 50 }, (_, i) => `并发概念${i}`)
+await Promise.all(cTitles.map((t) =>
+  store.writeConcept(root, { type: 'Fact', title: t, description: t, timestamp: new Date().toISOString() }, `# 核心\n\n${t}`)))
+const idx2 = await fs.readFile(path.join(root, 'index.md'), 'utf8')
+let allIn = true
+for (const t of cTitles) if (!idx2.includes(`fact/${t}`)) { allIn = false; break }
+assert('并发 50 写全部入索引', allIn)
+
 console.log(`\n结果:${pass} 通过,${fail} 失败`)
 if (fail > 0) process.exit(1)
 console.log('记忆库内容:')
