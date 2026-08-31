@@ -121,11 +121,12 @@ Default `~/.dsh/memory/` (overridable via `OKF_MEMORY_ROOT`):
 ## Development & Testing
 
 ```sh
-npm test                      # Full suite (smoke + integration + schema + concurrency)
+npm test                      # Full suite (smoke + integration + schema + concurrency + regression)
 node scripts/smoke.js         # Core module functional tests (incl. write-lock assertions)
 node scripts/integration.js   # Mock dsh ctx integration tests (incl. error paths)
 node scripts/schema-check.js  # Tool schema compliance
-node scripts/concurrency.js   # Write-lock stress test (50 parallel writes / 20 parallel feedbacks)
+node scripts/concurrency.js   # Write-lock stress test (50 parallel writes / 5 parallel feedbacks)
+node scripts/regression.js    # P0 regression: lock reentrancy/error recovery, merge edge cases, path traversal, forget idempotency
 ```
 
 ## License

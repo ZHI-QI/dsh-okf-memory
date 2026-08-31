@@ -5,10 +5,14 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const lib = path.join(__dirname, '..', 'lib')
+
+// 隔离:指向临时记忆库,避免 apply() 的 ensureRoot/startConsolidation 触及真实 ~/.dsh/memory
+process.env.OKF_MEMORY_ROOT = path.join(os.tmpdir(), `okf-schema-${Date.now()}`)
 
 // mock ctx 捕获工具定义
 const registered = []

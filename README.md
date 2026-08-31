@@ -123,11 +123,12 @@ Agent: okf_search(query="查询数据库")
 ## 开发与测试
 
 ```sh
-npm test                      # 全量测试(smoke + integration + schema + concurrency)
+npm test                      # 全量测试(smoke + integration + schema + concurrency + regression)
 node scripts/smoke.js         # 核心模块功能验证(含并发写锁断言)
 node scripts/integration.js   # mock dsh ctx 集成验证(含错误路径断言)
 node scripts/schema-check.js  # 工具 schema 合规
-node scripts/concurrency.js   # 写锁并发压测(50 并行写 / 20 并行反馈)
+node scripts/concurrency.js   # 写锁并发压测(50 并行写 / 5 并行反馈)
+node scripts/regression.js    # P0 回归:锁可重入/异常恢复、merge 边界、路径穿越、forget 幂等
 ```
 
 ## License

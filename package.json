@@ -23,7 +23,7 @@
     "url": "https://github.com/ZHI-QI/dsh-okf-memory.git"
   },
   "scripts": {
-    "test": "node scripts/smoke.js && node scripts/integration.js && node scripts/schema-check.js && node scripts/concurrency.js"
+    "test": "node scripts/smoke.js && node scripts/integration.js && node scripts/schema-check.js && node scripts/concurrency.js && node scripts/regression.js"
   },
   "dsh": {
     "bundle": {
