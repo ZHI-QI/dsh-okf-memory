@@ -26,6 +26,7 @@ console.log('记忆库根:', root)
 const store = await load('store.js')
 const concept = await load('concept.js')
 const learning = await load('learning.js')
+const dedupe = await load('dedupe.js')
 
 let pass = 0
 let fail = 0
@@ -166,6 +167,56 @@ assert('巩固调度运行后 weights 仍可读', !!meta2.entries)
 let disposeOk = true
 try { dispose() } catch { disposeOk = false }
 assert('apply dispose 不抛错', disposeOk)
+
+// ── G. P1 回归:parseFrontmatter 边界矩阵 ──
+const P = concept.parseFrontmatter
+// 单/双引号值(含转义)
+let fm = P('---\ntype: Fact\ntitle: "含 \\"引号\\" 和: 冒号"\n---\n\nb')
+assert('引号值保留冒号与转义引号', fm.meta.title === '含 "引号" 和: 冒号', JSON.stringify(fm.meta.title))
+// 空数组
+fm = P('---\ntype: Fact\ntags: []\n---\n\nb')
+assert('空数组解析为 []', Array.isArray(fm.meta.tags) && fm.meta.tags.length === 0)
+// 引号内逗号 + 方括号字符
+fm = P('---\ntype: Fact\ntags: ["a,b", "c[d]"]\n---\n\nb')
+assert('flow 数组引号内逗号/方括号不拆', fm.meta.tags.length === 2 && fm.meta.tags[0] === 'a,b' && fm.meta.tags[1] === 'c[d]', JSON.stringify(fm.meta.tags))
+// 多行块(| 字面保留换行)
+fm = P('---\ntype: Fact\ndesc: |\n  第一行\n  第二行\n---\n\nb')
+assert('多行块 | 保留换行', fm.meta.desc === '第一行\n第二行', JSON.stringify(fm.meta.desc))
+// 注释行与空白行跳过
+fm = P('---\n# 注释\ntype: Fact\n\n title: 带空格键\n---\n\nb')
+assert('注释/空行/键空格容错', fm.meta.type === 'Fact' && fm.meta.title === '带空格键', JSON.stringify(fm.meta))
+// 值内含 YAML 特殊开头(#/:/引号)不被误解析
+fm = P('---\ntype: Fact\ntitle: "#主题"\n---\n\nb')
+assert('#开头值解析', fm.meta.title === '#主题', JSON.stringify(fm.meta.title))
+// 写侧:yamlTags 对特殊字符 tag 转义往返
+const specialTags = ['a,b', 'c[d]', 'e"f', 'g:h', '#tag']
+const md2 = concept.buildConcept(
+  { type: 'Fact', title: '特殊标签', description: 'x', tags: specialTags, timestamp: '2026-01-01' },
+  '# 核心\n\nbody')
+const fmBack2 = P(md2)
+assert('特殊字符 tag 写读往返', JSON.stringify(fmBack2.meta.tags) === JSON.stringify(specialTags), JSON.stringify(fmBack2.meta.tags))
+
+// ── H. P1 回归:短词阈值边界 ──
+// 「AI」(2字)不误伤「AI工具」;「数据库」(3字)仍判相似
+await store.writeConcept(root,
+  { type: 'TechChoice', title: 'AI工具', description: 'AI 工具选型', timestamp: new Date().toISOString() },
+  '## Options\n\n| 候选 | 状态 |\n|---|---|\n| X | active |')
+let sim = await dedupe.findSimilarByTitle(root, 'AI', 'TechChoice')
+assert('短词 AI 不命中 AI工具(2<3)', sim.length === 0, JSON.stringify(sim))
+sim = await dedupe.findSimilarByTitle(root, '数据库', 'TechChoice')
+assert('3 字符仍可命中包含', sim.length === 0) // 库中无含「数据库」标题,应 0(只验证不误报)
+
+// ── I. P1 回归:refreshIndex 描述处理(截断/空描述/无 frontmatter 兜底) ──
+await store.writeConcept(root,
+  { type: 'Fact', title: '超长描述', description: 'x'.repeat(200), timestamp: new Date().toISOString() },
+  '# 核心\n\nbody')
+await store.writeConcept(root,
+  { type: 'Fact', title: '无描述概念', timestamp: new Date().toISOString() },
+  '# 核心\n\nbody')
+const idxLong = await fs.readFile(path.join(root, 'index.md'), 'utf8')
+assert('超长描述截断到 60 字符', !idxLong.includes('x'.repeat(61)), '描述未截断')
+const lineNoDesc = idxLong.split('\n').find((l) => l.includes('无描述概念'))
+assert('无描述概念不带 — 后缀', lineNoDesc && !lineNoDesc.includes('—'), lineNoDesc)
 
 console.log(`\n结果:${pass} 通过,${fail} 失败`)
 if (fail > 0) process.exit(1)
