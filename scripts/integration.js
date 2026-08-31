@@ -50,18 +50,20 @@ assert('服务有 search/read/write', typeof ctx.okfMemory.search === 'function'
 assert('服务有 preload(P1-8)', typeof ctx.okfMemory.preload === 'function')
 
 // 工具注册
-assert('注册 4 个工具', registeredTools.length === 4)
+assert('注册 5 个工具', registeredTools.length === 5)
 const byName = Object.fromEntries(registeredTools.map((t) => [t.name, t]))
 assert('okf_remember 已注册', !!byName.okf_remember)
 assert('okf_search 已注册', !!byName.okf_search)
 assert('okf_read 已注册', !!byName.okf_read)
 assert('okf_forget 已注册', !!byName.okf_forget)
+assert('okf_graph 已注册(M1)', !!byName.okf_graph)
 
 // 工具描述中英双语(P1-10)
 assert('remember 描述含英文', /[A-Za-z]{4,}/.test(byName.okf_remember.description) && (byName.okf_remember.description || '').includes('Write a new piece'))
 assert('search 描述含英文', (byName.okf_search.description || '').includes('Search the OKF'))
 assert('read 描述含英文', (byName.okf_read.description || '').includes('Read a full concept'))
 assert('forget 描述含英文', (byName.okf_forget.description || '').includes('Withdraw a concept'))
+assert('graph 描述含英文', (byName.okf_graph.description || '').includes('Export the memory graph'))
 
 // 系统提示
 assert('注入记忆纪律', promptParts.some((p) => (p.text || '').includes('记忆纪律')))
@@ -73,6 +75,7 @@ const remember = byName.okf_remember
 const searchTool = byName.okf_search
 const readTool = byName.okf_read
 const forgetTool = byName.okf_forget
+const graphTool = byName.okf_graph
 
 // 1. remember 普通概念
 let r = await remember.execute({ title: '门店布局', type: 'Fact', content: '# 核心\n\n三家门店共用局域网共享文件夹。\n\n## 细节\n- 韶山店\n- 湘乡店\n- 塘厦店', tags: ['门店'] })
@@ -148,6 +151,14 @@ assert('forget(删文件) → forgotten', fgDel.status === 'forgotten', JSON.str
 let fileGone = true
 try { await fs.access(path.join(root, 'fact', '待删概念.md')); fileGone = false } catch { /* 应已删除 */ }
 assert('文件已删除', fileGone)
+
+// 8c. okf_graph 导出图谱(M1)
+const gg = await graphTool.execute({})
+assert('okf_graph 返回 nodes', Array.isArray(gg.nodes) && gg.nodes.length >= 2, JSON.stringify({n:gg.nodes.length}))
+assert('okf_graph 节点含 type/weight', gg.nodes[0].type && typeof gg.nodes[0].weight === 'number')
+assert('okf_graph 返回 edges/timeline/meta', Array.isArray(gg.edges) && Array.isArray(gg.timeline) && !!gg.meta)
+// 服务也暴露 graph
+assert('service.graph 可用', typeof ctx.okfMemory.graph === 'function')
 
 // 9. index/log 完整性
 const indexText = await fs.readFile(path.join(root, 'index.md'), 'utf8')
