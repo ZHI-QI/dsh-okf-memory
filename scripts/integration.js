@@ -47,6 +47,7 @@ assert('apply 执行完成', !!ctx.okfMemory)
 // 服务
 assert('服务暴露 root', ctx.okfMemory.root === root)
 assert('服务有 search/read/write', typeof ctx.okfMemory.search === 'function' && typeof ctx.okfMemory.write === 'function')
+assert('服务有 preload(P1-8)', typeof ctx.okfMemory.preload === 'function')
 
 // 工具注册
 assert('注册 4 个工具', registeredTools.length === 4)
@@ -56,9 +57,16 @@ assert('okf_search 已注册', !!byName.okf_search)
 assert('okf_read 已注册', !!byName.okf_read)
 assert('okf_forget 已注册', !!byName.okf_forget)
 
+// 工具描述中英双语(P1-10)
+assert('remember 描述含英文', /[A-Za-z]{4,}/.test(byName.okf_remember.description) && (byName.okf_remember.description || '').includes('Write a new piece'))
+assert('search 描述含英文', (byName.okf_search.description || '').includes('Search the OKF'))
+assert('read 描述含英文', (byName.okf_read.description || '').includes('Read a full concept'))
+assert('forget 描述含英文', (byName.okf_forget.description || '').includes('Withdraw a concept'))
+
 // 系统提示
 assert('注入记忆纪律', promptParts.some((p) => (p.text || '').includes('记忆纪律')))
 assert('注入库摘要', promptParts.some((p) => (p.text || '').includes('OKF 记忆库')))
+assert('注入召回指引(P1-8)', promptParts.some((p) => p.name === 'okf-memory-recall-guide' && (p.text || '').includes('okf_read')))
 
 // ── 通过工具 execute 走全链路 ──
 const remember = byName.okf_remember
