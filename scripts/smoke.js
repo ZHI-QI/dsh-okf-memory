@@ -23,6 +23,7 @@ const concept = await load('concept.js')
 const dedupe = await load('dedupe.js')
 const learning = await load('learning.js')
 const recall = await load('recall.js')
+const graph = await load('graph.js')
 
 let pass = 0
 let fail = 0
@@ -168,6 +169,15 @@ assert('完整标题精确命中', simLong.length === 1 && simLong[0].similarity
 // 17. index.md 带 description(P1-9)
 const idxWithDesc = await fs.readFile(path.join(root, 'index.md'), 'utf8')
 assert('index 行含 description', idxWithDesc.includes('— 前端技术选型'), idxWithDesc.slice(0, 400))
+
+// 18. 记忆图谱数据(M1 okf_graph):nodes/edges/timeline
+const g = await graph.buildGraph(root)
+assert('graph 有全部节点', g.nodes.length >= 11, `nodes=${g.nodes.length}`)
+assert('graph 节点含 title/type/weight', g.nodes[0].title && g.nodes[0].type && typeof g.nodes[0].weight === 'number')
+assert('graph 有边(交叉链接)', g.edges.length >= 1, `edges=${g.edges.length}`)
+assert('graph 边为 source/target', g.edges[0].source && g.edges[0].target)
+assert('graph timeline 有权重历史', Array.isArray(g.timeline) && g.timeline.length >= 1)
+assert('graph meta 含 totalConcepts', g.meta.totalConcepts === g.nodes.length)
 
 console.log(`\n结果:${pass} 通过,${fail} 失败`)
 if (fail > 0) process.exit(1)

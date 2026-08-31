@@ -2,4 +2,6 @@ node_modules/
 *.log
 .DS_Store
 *.tgz
+docs/*-演示.html
+docs/*-demo.html
 
