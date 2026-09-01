@@ -44,15 +44,19 @@ function MemoryGraphView() {
       .catch((e) => setError(String(e.message || e)));
   }, []);
 
-  // 初始化布局(一次,稳定)
+  // 初始化布局(一次,稳定):世界坐标以(0,0)为中心,节点分布半径随数量自适应
   React.useEffect(() => {
     if (!graph || layoutRef.current.length) return;
     const maxW = Math.max(...graph.nodes.map((n) => n.weight), 1);
-    layoutRef.current = graph.nodes.map((n) => {
-      const h = hash(n.id);
-      const x = 0 + ((h % 100) / 100 - 0.5) * 600;
-      const y = 0 + (((h >> 7) % 100) / 100 - 0.5) * 400;
-      return { ...n, x, y, vx: 0, vy: 0, r: 8 + Math.sqrt(n.weight / maxW) * 20 };
+    const n = graph.nodes.length;
+    const R = Math.max(120, Math.min(300, 60 + n * 30));
+    layoutRef.current = graph.nodes.map((node, i) => {
+      const h = hash(node.id);
+      const ang = (i / n) * Math.PI * 2; // 环形均布 + 轻微抖动
+      const r = R * (0.6 + ((h % 100) / 100) * 0.5);
+      const x = Math.cos(ang) * r;
+      const y = Math.sin(ang) * r;
+      return { ...node, x, y, vx: 0, vy: 0, r: 8 + Math.sqrt(node.weight / maxW) * 20 };
     });
   }, [graph]);
 
@@ -86,22 +90,29 @@ function MemoryGraphView() {
   const onMouseDown = (e: React.MouseEvent) => {
     const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
     const px = (e.clientX - rect.left), py = (e.clientY - rect.top);
-    const hit = hitTest(px, py, layoutRef.current, viewRef.current);
+    const cw = canvas.clientWidth || rect.width, ch = canvas.clientHeight || rect.height;
+    const hit = hitTest(px, py, layoutRef.current, viewRef.current, cw, ch);
     if (hit) { dragRef.current = { id: hit.id, offX: hit.x - px, offY: hit.y - py, panning: false, lastX: px, lastY: py }; }
     else { dragRef.current = { id: null, offX: 0, offY: 0, panning: true, lastX: px, lastY: py }; }
   };
   const onMouseMove = (e: React.MouseEvent) => {
     const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
     const px = (e.clientX - rect.left), py = (e.clientY - rect.top);
+    const cw = canvas.clientWidth || rect.width, ch = canvas.clientHeight || rect.height;
     const d = dragRef.current;
     if (d.id) {
       const n = layoutRef.current.find((x) => x.id === d.id);
-      if (n) { n.x = px + d.offX; n.y = py + d.offY; n.vx = 0; n.vy = 0; }
+      if (n) {
+        // 拖节点:用世界坐标(逆变换),offX 为世界坐标内偏移
+        const wx = (px - cw / 2 - viewRef.current.panX) / viewRef.current.zoom;
+        const wy = (py - ch / 2 - viewRef.current.panY) / viewRef.current.zoom;
+        n.x = wx + d.offX; n.y = wy + d.offY; n.vx = 0; n.vy = 0;
+      }
     } else if (d.panning) {
       viewRef.current.panX += px - d.lastX; viewRef.current.panY += py - d.lastY;
       d.lastX = px; d.lastY = py;
     }
-    const hover = hitTest(px, py, layoutRef.current, viewRef.current)?.id ?? null;
+    const hover = hitTest(px, py, layoutRef.current, viewRef.current, cw, ch)?.id ?? null;
     if (hover !== hoverRef.current) { hoverRef.current = hover; forceRender((x) => x + 1); }
   };
   const onMouseUp = () => { dragRef.current = { id: null, offX: 0, offY: 0, panning: false, lastX: 0, lastY: 0 }; };
@@ -144,9 +155,9 @@ function activateHits(nodes: GraphNode[], edges: GraphEdge[], hits: Set<string>)
   return act;
 }
 
-function hitTest(px: number, py: number, nodes: LayoutNode[], view: { zoom: number; panX: number; panY: number }) {
-  // 屏幕坐标 → 世界坐标
-  const wx = (px - view.panX) / view.zoom, wy = (py - view.panY) / view.zoom;
+function hitTest(px: number, py: number, nodes: LayoutNode[], view: { zoom: number; panX: number; panY: number }, canvasW: number, canvasH: number) {
+  // 屏幕坐标 → 世界坐标(世界原点在画布中心 W/2,H/2)
+  const wx = (px - canvasW / 2 - view.panX) / view.zoom, wy = (py - canvasH / 2 - view.panY) / view.zoom;
   for (let i = nodes.length - 1; i >= 0; i--) { const n = nodes[i]; const dx = n.x - wx, dy = n.y - wy; if (dx * dx + dy * dy < (n.r + 6) * (n.r + 6)) return n; }
   return null;
 }
@@ -166,11 +177,10 @@ function drawGraph(canvas: HTMLCanvasElement, graph: { nodes: GraphNode[]; edges
   const hits = new Set<string>();
   if (query.trim()) graph.nodes.forEach((n) => { if (matches(n, query)) hits.add(n.id); });
   const active = activateHits(graph.nodes, graph.edges, hits);
-  const hovered = hoverRef.current;
 
-  const worldW = W / view.zoom, worldH = H / view.zoom;
-  const offX = (W - worldW) / 2 + view.panX, offY = (H - worldH) / 2 + view.panY;
-  const tx = (x: number) => x * view.zoom + offX, ty = (y: number) => y * view.zoom + offY;
+  // 世界原点在画布中心:tx(x)=W/2 + x*zoom + panX
+  const tx = (x: number) => W / 2 + x * view.zoom + view.panX;
+  const ty = (y: number) => H / 2 + y * view.zoom + view.panY;
 
   ctx.fillStyle = "#13233a"; ctx.fillRect(0, 0, W, H);
 
