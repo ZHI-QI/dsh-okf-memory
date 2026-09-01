@@ -1,16 +1,34 @@
 /**
- * concept.js — OKF v0.1 概念化:frontmatter 组装、正文模板、概念 ID 规范化、frontmatter 解析。
+ * concept.ts — OKF v0.1 概念化:frontmatter 组装、正文模板、概念 ID 规范化、frontmatter 解析。
  * 依据 OKF v0.1:frontmatter 唯一硬要求是 type;title/description 强烈建议;tags/timestamp 可选;扩展字段允许。
  */
 
 /** 类型词表(起步版) */
-export const TYPE_VOCAB = [
+export const TYPE_VOCAB: readonly string[] = [
   'Fact', 'Preference', 'Decision', 'Method',
   'Insight', 'Idea', 'Lesson', 'TechChoice',
 ]
 
+/** 概念 frontmatter 元数据(OKF v0.1) */
+export interface ConceptMeta {
+  type: string
+  title?: string
+  description?: string
+  resource?: string
+  tags?: string[]
+  timestamp?: string
+  source?: string
+  [key: string]: unknown
+}
+
+/** 解析 frontmatter 的结果 */
+export interface ParsedFrontmatter {
+  meta: ConceptMeta | null
+  body: string
+}
+
 /** 归一化并校验概念类型(大小写不敏感,必须属于 TYPE_VOCAB);非法时抛错 */
-export function normalizeType(type) {
+export function normalizeType(type: unknown): string {
   const t = String(type || '').trim()
   if (!t) throw new Error('OKF 概念 type 必填')
   const hit = TYPE_VOCAB.find((v) => v.toLowerCase() === t.toLowerCase())
@@ -19,7 +37,7 @@ export function normalizeType(type) {
 }
 
 /** 规范化概念 ID:保留中文/字母数字,其余转连字符(Windows 安全字符集) */
-export function slugify(input) {
+export function slugify(input: unknown): string {
   return String(input ?? '')
     .trim()
     .toLowerCase()
@@ -30,7 +48,7 @@ export function slugify(input) {
 }
 
 /** YAML 标量转义 */
-function yamlScalar(v) {
+function yamlScalar(v: unknown): string {
   if (typeof v === 'string') {
     if (/^[\p{L}\p{N}\s.,\-_/:（）()%¥￥+*#@!?'"=<>\[\]{}|&^~`\\;]*$/u.test(v) && !/^[\s\-?:]/.test(v) && !v.includes(': ')) {
       return v
@@ -41,7 +59,7 @@ function yamlScalar(v) {
   return JSON.stringify(v)
 }
 
-function yamlTags(tags) {
+function yamlTags(tags: unknown): string {
   if (!Array.isArray(tags) || tags.length === 0) return 'tags: []'
   const items = tags.map((t) => {
     const s = String(t)
@@ -52,7 +70,7 @@ function yamlTags(tags) {
 }
 
 /** 生成 frontmatter(固定顺序,稳定可比较) */
-export function buildFrontmatter(meta) {
+export function buildFrontmatter(meta: ConceptMeta): string {
   const lines = ['---']
   const order = ['type', 'title', 'description', 'resource', 'tags', 'timestamp', 'source']
   for (const key of order) {
@@ -75,11 +93,8 @@ export function buildFrontmatter(meta) {
 
 /**
  * 生成概念文档。
- * @param {object} meta frontmatter 字段(type 必填)
- * @param {string} body 结构化正文(Markdown,调用方提供,含 # 小节标题)
- * @returns {string} 完整 .md 内容
  */
-export function buildConcept(meta, body) {
+export function buildConcept(meta: ConceptMeta, body: string): string {
   const type = String(meta.type || '').trim()
   if (!type) throw new Error('OKF 概念必须包含非空 type')
   const fm = buildFrontmatter(meta)
@@ -89,11 +104,10 @@ export function buildConcept(meta, body) {
 
 /**
  * 决策/结论三段式模板(继承用户约定:数据/分析/结论)。
- * @param {{data?: string, analysis?: string, conclusion: string}} parts
  */
-export function buildDecisionBody(parts) {
+export function buildDecisionBody(parts: { data?: string; analysis?: string; conclusion: string }): string {
   const { data, analysis, conclusion } = parts || {}
-  const out = []
+  const out: string[] = []
   if (data) out.push(`# 数据\n\n${data.trim()}`)
   if (analysis) out.push(`# 分析\n\n${analysis.trim()}`)
   if (conclusion) out.push(`# 结论\n\n${conclusion.trim()}`)
@@ -103,15 +117,14 @@ export function buildDecisionBody(parts) {
 
 /**
  * 技术选型正文模板(TechChoice):Options 候选表 + Active 当前使用。
- * @param {{title: string, options: Array<{name: string, desc?: string, config?: string, status?: string}>, active?: string, notes?: string}} spec
  */
-export function buildTechChoiceBody(spec) {
+export function buildTechChoiceBody(spec: { title?: string; options: Array<{ name: string; desc?: string; config?: string; status?: string }>; active?: string; notes?: string }): string {
   const opts = spec.options || []
   if (opts.length === 0) throw new Error('TechChoice 至少需要一个候选')
   const rows = opts
     .map((o) => `| ${yamlScalar(o.name)} | ${yamlScalar(o.desc || '')} | ${yamlScalar(o.config || '')} | ${yamlScalar(o.status || 'candidate')} |`)
     .join('\n')
-  const out = []
+  const out: string[] = []
   out.push(`## Options\n\n| 候选 | 说明 | 配置要点 | 状态 |\n|---|---|---|---|\n${rows}`)
   if (spec.active) out.push(`## Active\n\n- 当前使用:${spec.active}`)
   if (spec.notes) out.push(`## 相关\n\n${spec.notes.trim()}`)
@@ -119,12 +132,12 @@ export function buildTechChoiceBody(spec) {
 }
 
 /** 解析 frontmatter(容错:解析失败返回 {meta:null, body:原文};支持引号/多行块/flow 数组) */
-export function parseFrontmatter(md) {
+export function parseFrontmatter(md: unknown): ParsedFrontmatter {
   const text = String(md || '')
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   if (!m) return { meta: null, body: text }
   const [, yaml, body] = m
-  const meta = {}
+  const meta: Record<string, unknown> = {}
   const lines = yaml.split(/\r?\n/)
   let i = 0
   while (i < lines.length) {
@@ -137,7 +150,7 @@ export function parseFrontmatter(md) {
     let val = line.slice(idx + 1).trim()
     // 多行块值(| 字面 / > 折叠)
     if (val === '|' || val === '>' || val === '|-' || val === '>-') {
-      const block = []
+      const block: string[] = []
       i++
       while (i < lines.length && /^\s+/.test(lines[i])) {
         block.push(lines[i].replace(/^[ \t]+/, ''))
@@ -155,14 +168,14 @@ export function parseFrontmatter(md) {
     meta[key] = unquoteScalar(val)
     i++
   }
-  return { meta, body: body || '' }
+  return { meta: meta as ConceptMeta, body: body || '' }
 }
 
 /** flow 数组拆分:引号内的逗号不拆,去引号/转义(闭合引号消费但不进内容;反斜杠转义下一个字符) */
-function splitFlowArray(s) {
-  const out = []
+function splitFlowArray(s: string): string[] {
+  const out: string[] = []
   let cur = ''
-  let q = null
+  let q: string | null = null
   let esc = false
   for (const ch of s) {
     if (esc) {
@@ -191,7 +204,7 @@ function splitFlowArray(s) {
 }
 
 /** 去掉标量两端匹配的引号并还原常见转义 */
-function unquoteScalar(v) {
+function unquoteScalar(v: string): string {
   const s = String(v || '').trim()
   if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
     return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\n/g, '\n')
@@ -199,13 +212,18 @@ function unquoteScalar(v) {
   return s
 }
 
+export interface ValidationResult {
+  ok: boolean
+  errors: string[]
+  warnings: string[]
+}
+
 /**
  * OKF v0.1 符合性校验(三条硬要求 + 建议字段)。
- * @returns {{ok: boolean, errors: string[], warnings: string[]}}
  */
-export function validateConcept(md) {
-  const errors = []
-  const warnings = []
+export function validateConcept(md: string): ValidationResult {
+  const errors: string[] = []
+  const warnings: string[] = []
   const { meta } = parseFrontmatter(md)
   // 硬要求 1:可解析 YAML 头信息
   if (!meta) {
@@ -222,16 +240,21 @@ export function validateConcept(md) {
   return { ok: errors.length === 0, errors, warnings }
 }
 
+interface Section {
+  key: string | null
+  content: string
+}
+
 /**
  * 按顶层小节合并两份概念正文(防止更新时无限追加 "## 补充(日期)"):
  * - 相同小节标题(如 # 数据 / ## Options)→ 新内容覆盖旧小节,保留原位置
  * - 新小节 → 追加到末尾
  * - 无标题引言 → 仅当旧文没有引言时才补入
  */
-export function mergeConceptBodies(existing, incoming) {
+export function mergeConceptBodies(existing: string, incoming: string): string {
   const ex = splitSections(existing)
   const inc = splitSections(incoming)
-  const byKey = new Map(ex.map((s) => [s.key, s]))
+  const byKey = new Map<string | null, Section>(ex.map((s) => [s.key, s]))
   for (const s of inc) {
     if (s.key === null) {
       if (!byKey.has(null)) byKey.set(null, s)
@@ -239,8 +262,8 @@ export function mergeConceptBodies(existing, incoming) {
       byKey.set(s.key, s)
     }
   }
-  const out = []
-  const used = new Set()
+  const out: Section[] = []
+  const used = new Set<string | null>()
   for (const s of ex) {
     const hit = byKey.get(s.key)
     if (hit) { out.push(hit); used.add(s.key) }
@@ -252,9 +275,9 @@ export function mergeConceptBodies(existing, incoming) {
 }
 
 /** 按 #/##/### 顶层标题切分成小节(含无标题引言小节 key=null) */
-function splitSections(body) {
-  const sections = []
-  let cur = null
+function splitSections(body: unknown): Section[] {
+  const sections: Section[] = []
+  let cur: Section | null = null
   for (const line of String(body || '').split('\n')) {
     const m = /^(#{1,3})\s+(.*)$/.exec(line)
     if (m) {
@@ -272,7 +295,7 @@ function splitSections(body) {
   return sections
 }
 
-function renderSection(s) {
+function renderSection(s: Section): string {
   if (s.key === null) return s.content.trim()
   const body = s.content.trim()
   return body ? `${s.key}\n\n${body}` : s.key

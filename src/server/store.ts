@@ -1,19 +1,19 @@
 /**
- * store.js — OKF bundle 存储:根目录初始化、概念落盘、index.md 渐进式目录、log.md 变更历史。
+ * store.ts — OKF bundle 存储:根目录初始化、概念落盘、index.md 渐进式目录、log.md 变更历史。
  * 路径即概念 ID:<root>/<type小写>/<kebab-id>.md
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { parseFrontmatter, validateConcept, slugify } from './concept.js'
+import { parseFrontmatter, validateConcept, slugify, type ConceptMeta } from './concept.js'
 
 /**
  * 进程内写锁(可重入):串行化对 bundle 文件(index.md/log.md/概念/weights.json)的读-改-写,
  * 避免多会话并发写入时丢失更新。Cordis 单进程内生效,跨进程不保证。
  */
-let writeQueue = Promise.resolve()
+let writeQueue: Promise<void> = Promise.resolve()
 let lockDepth = 0
-export function withLock(fn) {
+export function withLock<T>(fn: () => Promise<T>): Promise<T> {
   // 已在锁内(可重入):直接执行,避免嵌套自锁死锁
   if (lockDepth > 0) return Promise.resolve().then(fn)
   const run = writeQueue.then(async () => {
@@ -29,18 +29,18 @@ export function withLock(fn) {
 }
 
 /** 默认记忆库根目录(可被 OKF_MEMORY_ROOT 环境变量覆盖) */
-export function defaultRoot() {
+export function defaultRoot(): string {
   return process.env.OKF_MEMORY_ROOT || path.join(os.homedir(), '.dsh', 'memory')
 }
 
 /** 概念文件路径 → 概念 ID(相对根,去扩展名,正斜杠归一) */
-export function conceptIdOf(filePath, root) {
+export function conceptIdOf(filePath: string, root: string): string {
   const rel = path.relative(root, filePath).replace(/\\/g, '/').replace(/\.md$/, '')
   return rel
 }
 
 /** 概念 ID → 文件路径(含安全校验:防路径穿越) */
-export function filePathOf(root, conceptId) {
+export function filePathOf(root: string, conceptId: string): string {
   const norm = String(conceptId || '').replace(/\\/g, '/').replace(/^\/+/, '')
   const resolved = path.resolve(root, ...norm.split('/'))
   const rootResolved = path.resolve(root)
@@ -51,7 +51,7 @@ export function filePathOf(root, conceptId) {
 }
 
 /** 确保记忆库骨架存在(根 index.md + log.md) */
-export async function ensureRoot(root) {
+export async function ensureRoot(root: string): Promise<void> {
   await fs.mkdir(root, { recursive: true })
   const indexPath = path.join(root, 'index.md')
   const logPath = path.join(root, 'log.md')
@@ -87,16 +87,30 @@ export async function ensureRoot(root) {
   }
 }
 
+export interface ConceptRef {
+  filePath: string
+  conceptId: string
+  meta: ConceptMeta | null
+  body: string
+  text: string
+}
+
 /** 读取并解析概念文档(校验概念 ID 安全) */
-export async function readConcept(root, conceptId) {
+export async function readConcept(root: string, conceptId: string): Promise<ConceptRef> {
   const filePath = filePathOf(root, conceptId)
   const text = await fs.readFile(filePath, 'utf8')
   const { meta, body } = parseFrontmatter(text)
   return { filePath, conceptId: conceptIdOf(filePath, root), meta, body, text }
 }
 
+export interface WriteResult {
+  action: 'created' | 'updated'
+  conceptId: string
+  filePath: string
+}
+
 /** 写概念文档(先做符合性校验,再落盘,更新 index/log) */
-export async function writeConcept(root, meta, body) {
+export async function writeConcept(root: string, meta: ConceptMeta, body: string): Promise<WriteResult> {
   return withLock(async () => {
     const { buildConcept } = await import('./concept.js')
     const md = buildConcept(meta, body)
@@ -112,7 +126,7 @@ export async function writeConcept(root, meta, body) {
     const filePath = path.join(dir, `${base}.md`)
 
     // 同路径已有内容 → 更新(timestamp 刷新),否则新建
-    let action = 'created'
+    let action: 'created' | 'updated' = 'created'
     try {
       await fs.access(filePath)
       action = 'updated'
@@ -127,10 +141,16 @@ export async function writeConcept(root, meta, body) {
   })
 }
 
+export interface BundleEntry {
+  filePath: string
+  conceptId: string
+  typeDir: string
+}
+
 /** 全库扫描:返回所有概念文档清单(用于 index 重建与检索) */
-export async function scanBundle(root) {
-  const out = []
-  let entries
+export async function scanBundle(root: string): Promise<BundleEntry[]> {
+  const out: BundleEntry[] = []
+  let entries: import('node:fs').Dirent[]
   try {
     entries = await fs.readdir(root, { withFileTypes: true })
   } catch {
@@ -140,7 +160,7 @@ export async function scanBundle(root) {
     if (!e.isDirectory()) continue
     if (e.name.startsWith('.')) continue
     const dir = path.join(root, e.name)
-    let files
+    let files: string[]
     try {
       files = await fs.readdir(dir)
     } catch {
@@ -157,7 +177,7 @@ export async function scanBundle(root) {
 }
 
 /** 重建根 index.md(渐进式目录:按类型分组列概念,每行附 description 供模型感知"库里有啥";写锁内串行) */
-export async function refreshIndex(root) {
+export async function refreshIndex(root: string): Promise<void> {
   return withLock(async () => {
     const concepts = await scanBundle(root)
     // 并行读每个概念 frontmatter,取 title/description 供 index 展示
@@ -170,12 +190,12 @@ export async function refreshIndex(root) {
         return {}
       }
     }))
-    const byType = new Map()
+    const byType = new Map<string, Array<{ id: string; desc: string }>>()
     for (let i = 0; i < concepts.length; i++) {
       const c = concepts[i]
       if (!byType.has(c.typeDir)) byType.set(c.typeDir, [])
       const desc = String(metas[i].description || '').trim().replace(/\s+/g, ' ').slice(0, 60)
-      byType.get(c.typeDir).push({ id: c.conceptId, desc })
+      byType.get(c.typeDir)!.push({ id: c.conceptId, desc })
     }
     const lines = [
       '---',
@@ -202,8 +222,15 @@ export async function refreshIndex(root) {
   })
 }
 
+export interface LogEntry {
+  action: string
+  conceptId: string
+  type: string
+  title?: string
+}
+
 /** 追加 log.md 变更记录(## YYYY-MM-DD 分组;写锁内串行) */
-export async function appendLog(root, entry) {
+export async function appendLog(root: string, entry: LogEntry): Promise<void> {
   return withLock(async () => {
     const logPath = path.join(root, 'log.md')
     const now = new Date()

@@ -1,32 +1,33 @@
 /**
  * dsh-okf-memory — 会话记忆 → OKF 知识沉淀插件(神经自我学习驱动)。
  *
- * 工具:okf_remember / okf_search / okf_read / okf_forget
- * 服务:ctx.okfMemory(root, search, read, write, consolidate, meta)
+ * 工具:okf_remember / okf_search / okf_read / okf_forget / okf_graph
+ * 服务:ctx.okfMemory(root, search, read, write, consolidate, meta, preload, graph)
  * 记忆库:OKF v0.1 bundle,默认 ~/.dsh/memory/(环境变量 OKF_MEMORY_ROOT 可覆盖)
  */
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import {
   ensureRoot, writeConcept, readConcept, refreshIndex, appendLog, defaultRoot, filePathOf, scanBundle, withLock,
+  type ConceptRef, type WriteResult,
 } from './store.js'
-import { search, findSimilarByTitle } from './dedupe.js'
+import { search, findSimilarByTitle, type SearchHit } from './dedupe.js'
 import { preload, recall } from './recall.js'
-import { loadMeta, saveMeta, recordSelect, recordSkip, consolidate, rank, startConsolidation } from './learning.js'
+import { loadMeta, saveMeta, recordSelect, recordSkip, consolidate, rank, startConsolidation, type MemoryMeta } from './learning.js'
 import { MEMORY_DISCIPLINE, RECALL_GUIDE } from './capture.js'
-import { buildDecisionBody, buildTechChoiceBody, TYPE_VOCAB, slugify, normalizeType, mergeConceptBodies } from './concept.js'
-import { buildGraph } from './graph.js'
+import { buildDecisionBody, buildTechChoiceBody, TYPE_VOCAB, slugify, normalizeType, mergeConceptBodies, type ConceptMeta } from './concept.js'
+import { buildGraph, type GraphData } from './graph.js'
 
 /**
  * defineTool 动态解析:dsh 运行时提供 @deepseek-ai/dsh-tools 时用官方 API,
  * 不可用时降级为透传定义对象(兼容运行时不暴露该包的情况)。
  */
-async function loadDefineTool() {
+async function loadDefineTool(): Promise<(def: unknown) => unknown> {
   try {
     const mod = await import('@deepseek-ai/dsh-tools')
-    return mod.defineTool || ((def) => def)
+    return (mod as { defineTool?: (d: unknown) => unknown }).defineTool || ((def: unknown) => def)
   } catch {
-    return (def) => def
+    return (def: unknown) => def
   }
 }
 
@@ -37,8 +38,19 @@ export const inject = ['tools', 'systemPrompt']
 /** 会话启动预取条数 */
 const PRELOAD_LIMIT = 5
 
+/** 最小 dsh Cordis 上下文类型(实际以运行时为准;只声明本插件用到的面) */
+export interface DshContext {
+  settings?: { okfMemory?: { root?: string } }
+  systemPrompt?: { section: (opts: { name: string; order: number; text: string }) => void }
+  provide?: (name: string, impl: unknown) => void
+  tools: { register: (def: unknown) => void }
+  inject?: (services: string[], fn: (scope: Record<string, unknown>) => void) => void
+  okfMemory?: unknown
+  [key: string]: unknown
+}
+
 /** 解析记忆库根目录(优先级:settings > env > 默认) */
-function resolveRoot(ctx) {
+function resolveRoot(ctx: DshContext): string {
   try {
     const s = ctx.settings?.okfMemory?.root
     if (s) return path.resolve(String(s))
@@ -50,7 +62,7 @@ function resolveRoot(ctx) {
  * 注入系统提示片段(正确 API:dsh-system-prompt 的 section,字段 name/order/text。
  * 之前误用 add() 静默失效;不能用 register()。失败时静默跳过,不阻塞插件加载)。
  */
-function addPrompt(ctx, name, content, order) {
+function addPrompt(ctx: DshContext, name: string, content: string, order: number): void {
   try {
     if (ctx.systemPrompt?.section) {
       ctx.systemPrompt.section({ name, order, text: content })
@@ -59,24 +71,35 @@ function addPrompt(ctx, name, content, order) {
 }
 
 /** 把根 index.md 摘要整理成提示片段(模型每轮可见"库里有啥") */
-async function buildIndexPrompt(root) {
+async function buildIndexPrompt(root: string): Promise<string> {
   try {
     const text = await fs.readFile(path.join(root, 'index.md'), 'utf8')
     const concepts = await scanBundle(root)
-    const summary = `记忆库共有 ${concepts.length} 个概念(路径即概念 ID)。库目录:\n${text.slice(0, 3000)}`
-    return summary
+    return `记忆库共有 ${concepts.length} 个概念(路径即概念 ID)。库目录:\n${text.slice(0, 3000)}`
   } catch {
     return 'OKF 记忆库为空或不可读。'
   }
 }
 
-export async function apply(ctx) {
+interface OkfMemoryService {
+  root: string
+  search: (q: string, opts?: object) => Promise<SearchHit[]>
+  read: (id: string) => Promise<unknown>
+  write: (meta: ConceptMeta, body: string) => Promise<WriteResult>
+  remember: (meta: RememberArgs, body: string, opts?: RememberOpts) => Promise<RememberResult>
+  consolidate: () => Promise<MemoryMeta>
+  meta: () => Promise<MemoryMeta>
+  preload: (query: string, opts?: object) => Promise<unknown>
+  graph: (opts?: object) => Promise<GraphData>
+}
+
+export async function apply(ctx: DshContext): Promise<() => void> {
   const defineTool = await loadDefineTool()
   const root = resolveRoot(ctx)
   await ensureRoot(root)
 
   // ── 服务:ctx.okfMemory(供其他插件/工具消费) ──
-  const service = {
+  const service: OkfMemoryService = {
     root,
     search: (q, opts) => search(root, q, opts),
     read: (id) => recall(root, id),
@@ -84,13 +107,11 @@ export async function apply(ctx) {
     remember: (meta, body, opts) => rememberCore(root, meta, body, opts),
     consolidate: () => consolidate(root),
     meta: () => loadMeta(root),
-    // P1-8:预测性预取(供其他插件/后续瀑布接线用;会话开场可先 service.preload 粗筛)
     preload: (query, opts) => preload(root, query, opts),
-    // 记忆图谱 JSON(供可视化前端/服务消费)
     graph: (opts) => buildGraph(root, opts),
   }
   try {
-    ctx.provide('okfMemory', service)
+    ctx.provide?.('okfMemory', service)
   } catch {
     ctx.okfMemory = service
   }
@@ -102,18 +123,19 @@ export async function apply(ctx) {
   if (typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], (scope) => {
       try {
-        scope.webServer.register({
+        const ws = scope.webServer as { register: (opts: { name: string; kind: string; path: string; handler: (req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (b: string) => void }) => Promise<void> | void }) => void }
+        ws.register({
           name: 'okf-memory-graph',
           kind: 'exact',
           path: '/okf-graph',
-          handler: async (req, res) => {
+          handler: async (_req, res) => {
             try {
               const g = await buildGraph(root)
               res.writeHead(200, { 'content-type': 'application/json' })
               res.end(JSON.stringify(g))
             } catch (e) {
               res.writeHead(500, { 'content-type': 'application/json' })
-              res.end(JSON.stringify({ error: String(e.message || e) }))
+              res.end(JSON.stringify({ error: String((e as Error).message || e) }))
             }
           },
         })
@@ -143,7 +165,7 @@ export async function apply(ctx) {
     output: {
       schema: {
         type: 'object',
-          additionalProperties: true,
+        additionalProperties: true,
         properties: {
           status: { type: 'string' },
           conceptId: { type: 'string' },
@@ -151,7 +173,7 @@ export async function apply(ctx) {
           reason: { type: 'string' },
         },
       },
-      render: (_args, value) => [{
+      render: (_args: unknown, value: RememberResult) => [{
         type: 'text',
         text: value.status === 'error'
           ? `记忆写入失败:${value.reason}`
@@ -164,7 +186,7 @@ export async function apply(ctx) {
                 : `记忆写入:${value.status}`,
       }],
     },
-    async execute(args) {
+    async execute(args: { title: string; type: string; content: string; tags?: string[]; related?: string[] }) {
       try {
         return await rememberCore(root, {
           title: args.title,
@@ -173,7 +195,7 @@ export async function apply(ctx) {
           related: args.related,
         }, args.content)
       } catch (e) {
-        return { status: 'error', conceptId: null, reason: String(e.message || e) }
+        return { status: 'error', conceptId: null, reason: String((e as Error).message || e) }
       }
     },
   }))
@@ -196,29 +218,29 @@ export async function apply(ctx) {
     output: {
       schema: {
         type: 'object',
-          additionalProperties: true,
+        additionalProperties: true,
         properties: {
           count: { type: 'number' },
           results: { type: 'array', items: { type: 'object', additionalProperties: true } },
         },
       },
-      render: (_args, value) => [{
+      render: (_args: unknown, value: { count: number; results: Array<{ conceptId: string; type: string; weight: number; description: string }> }) => [{
         type: 'text',
         text: value.count === 0
           ? '记忆库无匹配。'
           : `检索到 ${value.count} 条记忆:\n` + value.results.map((r) => `- ${r.conceptId} (${r.type}, 权重 ${r.weight}) ${r.description}`).join('\n'),
       }],
     },
-    async execute(args) {
+    async execute(args: { query: string; type?: string; tags?: string[]; limit?: number }) {
       const raw = await search(root, args.query, {
         type: args.type,
         tags: args.tags,
         limit: Math.min(args.limit || 8, 30),
       })
       const ranked = await rank(root, raw)
-      const results = []
+      const results: Array<Record<string, unknown>> = []
       for (const h of ranked) {
-        const item = { ...h }
+        const item: Record<string, unknown> = { ...h }
         if (h.type === 'TechChoice') {
           // 附加候选表:读全文 Options 节
           try {
@@ -245,7 +267,7 @@ export async function apply(ctx) {
     output: {
       schema: {
         type: 'object',
-          additionalProperties: true,
+        additionalProperties: true,
         properties: {
           conceptId: { type: 'string' },
           title: { type: 'string' },
@@ -254,12 +276,12 @@ export async function apply(ctx) {
           links: { type: 'array', items: { type: 'object', additionalProperties: true } },
         },
       },
-      render: (_args, value) => [{
+      render: (_args: unknown, value: { title: string; type: string; body: string }) => [{
         type: 'text',
         text: `# ${value.title} (${value.type})\n\n${value.body}`,
       }],
     },
-    async execute(args) {
+    async execute(args: { concept_id: string }) {
       const id = String(args.concept_id).replace(/\.md$/, '')
       const concept = await recall(root, id)
       return {
@@ -284,12 +306,12 @@ export async function apply(ctx) {
     },
     output: {
       schema: { type: 'object', additionalProperties: true, properties: { meta: { type: 'object', additionalProperties: true }, nodes: { type: 'array', items: { type: 'object', additionalProperties: true } }, edges: { type: 'array', items: { type: 'object', additionalProperties: true } }, timeline: { type: 'array', items: { type: 'object', additionalProperties: true } } } },
-      render: (_args, value) => [{
+      render: (_args: unknown, value: GraphData) => [{
         type: 'text',
         text: `记忆图谱:${value.nodes?.length || 0} 节点 · ${value.edges?.length || 0} 边 · ${value.timeline?.length || 0} 权重历史`,
       }],
     },
-    async execute(args) {
+    async execute(args: { limit?: number }) {
       const g = await buildGraph(root)
       if (args.limit && args.limit > 0) g.nodes = g.nodes.slice(0, Math.min(args.limit, 500))
       return { meta: g.meta, nodes: g.nodes, edges: g.edges, timeline: g.timeline }
@@ -308,7 +330,7 @@ export async function apply(ctx) {
     },
     output: {
       schema: { type: 'object', additionalProperties: true, properties: { status: { type: 'string' }, conceptId: { type: 'string' }, reason: { type: 'string' } } },
-      render: (_args, value) => [{
+      render: (_args: unknown, value: ForgetResult) => [{
         type: 'text',
         text: value.status === 'forgotten'
           ? `已撤回记忆 ${value.conceptId}${value.reason ? `(${value.reason})` : ''}`
@@ -317,12 +339,12 @@ export async function apply(ctx) {
             : `撤回失败:${value.reason || value.status}`,
       }],
     },
-    async execute(args) {
+    async execute(args: { concept_id: string; delete_file?: boolean }) {
       const id = String(args.concept_id).replace(/\.md$/, '')
       try {
         return await forgetCore(root, id, args.delete_file === true)
       } catch (e) {
-        return { status: 'error', conceptId: id, reason: String(e.message || e) }
+        return { status: 'error', conceptId: id, reason: String((e as Error).message || e) }
       }
     },
   }))
@@ -331,7 +353,6 @@ export async function apply(ctx) {
   addPrompt(ctx, 'okf-memory-discipline', MEMORY_DISCIPLINE, 50)
   const indexPrompt = await buildIndexPrompt(root)
   addPrompt(ctx, 'okf-memory-index', indexPrompt, 150)
-  // P1-8:召回指引(低优先级,提示用 okf_read 取细节)
   addPrompt(ctx, 'okf-memory-recall-guide', RECALL_GUIDE, 160)
 
   // ── 预取增强(暂移除) ──
@@ -347,11 +368,32 @@ export async function apply(ctx) {
   }
 }
 
+interface RememberArgs {
+  title: string
+  type: string
+  tags?: string[]
+  related?: string[]
+}
+
+interface RememberOpts {
+  force?: boolean
+  description?: string
+  source?: string
+}
+
+interface RememberResult {
+  status: string
+  conceptId: string | null
+  filePath?: string
+  reason?: string
+  similarTo?: string
+}
+
 /**
  * remember 核心(服务与工具共用):类型校验 → 去重 → 小节级合并/新建 → 反馈。
  * 全程持写锁,保证"判断→写入"原子,避免并发下同标题概念被重复创建。
  */
-async function rememberCore(root, meta, body, opts = {}) {
+async function rememberCore(root: string, meta: RememberArgs, body: string, opts: RememberOpts = {}): Promise<RememberResult> {
   return withLock(async () => {
     const { title, type, tags, related } = meta
     if (!title || !body) throw new Error('title/content 必填')
@@ -371,8 +413,8 @@ async function rememberCore(root, meta, body, opts = {}) {
           // P0-5:按 # 小节合并:同小节覆盖、新小节追加,不再无限 "## 补充(日期)"
           const mergedBody = mergeConceptBodies(existing.body || '', body)
           const res = await writeConcept(root, {
-            ...existing.meta, title, type: normType, tags: tags || existing.meta.tags, timestamp: new Date().toISOString(),
-          }, mergedBody)
+            ...existing.meta, title, type: normType, tags: tags || existing.meta?.tags, timestamp: new Date().toISOString(),
+          } as ConceptMeta, mergedBody)
           return { status: 'updated', conceptId: res.conceptId, filePath: res.filePath, reason: '标题相同,按小节合并更新' }
         }
         return { status: 'skipped', conceptId: top.conceptId, reason: `标题相同的概念已存在(${existingLen}字),新内容(${newLen}字)未显著增加` }
@@ -402,7 +444,7 @@ async function rememberCore(root, meta, body, opts = {}) {
           const r = await readConcept(root, String(rid).replace(/\.md$/, ''))
           const linkLine = `\n\n## 相关\n\n- [${title}](/${res.conceptId}.md)`
           if (!(r.body || '').includes(res.conceptId)) {
-            await writeConcept(root, { ...r.meta, timestamp: new Date().toISOString() }, `${r.body?.trim() || ''}${linkLine}`)
+            await writeConcept(root, { ...r.meta, timestamp: new Date().toISOString() } as ConceptMeta, `${r.body?.trim() || ''}${linkLine}`)
           }
         } catch { /* 相关概念不存在则忽略 */ }
       }
@@ -411,11 +453,17 @@ async function rememberCore(root, meta, body, opts = {}) {
   })
 }
 
+interface ForgetResult {
+  status: string
+  conceptId: string
+  reason?: string
+}
+
 /**
  * forget 核心:概念不存在返回 not_found;默认移到 .meta/forgotten/(保留目录结构防同名冲突),
  * delete_file=true 时直接删除文件。全程持写锁。
  */
-async function forgetCore(root, id, deleteFile) {
+async function forgetCore(root: string, id: string, deleteFile: boolean): Promise<ForgetResult> {
   return withLock(async () => {
     const filePath = filePathOf(root, id)
     let exists = true
@@ -453,7 +501,7 @@ async function forgetCore(root, id, deleteFile) {
   })
 }
 
-function firstLine(s) {
+function firstLine(s: string): string {
   const line = String(s || '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('#'))
   return line ? line.slice(0, 120) : ''
 }

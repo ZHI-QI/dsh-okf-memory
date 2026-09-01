@@ -1,11 +1,11 @@
 /**
- * capture.js — 记忆纪律(系统提示片段)与捕获评估。
+ * capture.ts — 记忆纪律(系统提示片段)与捕获评估。
  * 神经自我学习驱动:捕获由"预测误差"驱动 —— 用户纠正、首次披露、反直觉结论
  * 都是模型预测失败的信号,内在动机触发写入;取代固定规则表。
  */
 
 /** 注入系统提示的"记忆纪律"片段(Agent 自主决定何时调用 okf_remember) */
-export const MEMORY_DISCIPLINE = `
+export const MEMORY_DISCIPLINE: string = `
 # 记忆纪律(okf-memory)
 
 你有一个 OKF 长期记忆库。记忆不靠自动记录,而靠你判断"本轮是否产生了值得沉淀的新知识"。
@@ -42,6 +42,6 @@ export const MEMORY_DISCIPLINE = `
 `.trim()
 
 /** 预取提示:会话启动时建议先搜什么(低优先级,供摘要注入用) */
-export const RECALL_GUIDE = `
+export const RECALL_GUIDE: string = `
 记忆库概念清单见本片段顶部(okf-memory index)。需要细节时用 okf_read <concept_id>。
 `.trim()
