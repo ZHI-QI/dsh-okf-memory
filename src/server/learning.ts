@@ -1,5 +1,5 @@
 /**
- * learning.js — 神经自我学习核心:记忆权重元数据、强化反馈回路、巩固与遗忘。
+ * learning.ts — 神经自我学习核心:记忆权重元数据、强化反馈回路、巩固与遗忘。
  * 唤起评分 = relevance × weight × recency_factor(相关度 × 历史权重 × 近因)。
  * 元数据存 <root>/.meta/weights.json(点目录,不影响 OKF 符合性)。
  */
@@ -17,26 +17,39 @@ export const PARAMS = {
   ARCHIVE_THRESHOLD: 0.3,   // 权重低于该值 → 归档 inactive(不删除,可复活)
   ARCHIVE_RECOVER: 0.6,     // 归档后再次被唤起命中 → 复活阈值(权重提到该值)
   CONSOLIDATE_INTERVAL_MS: 24 * 60 * 60 * 1000, // 巩固周期:24h
+} as const
+
+export interface WeightEntry {
+  weight: number
+  accessCount: number
+  lastAccessed: string | null
+  state: 'active' | 'inactive'
 }
 
-function metaFile(root) {
+export interface MemoryMeta {
+  version: number
+  updatedAt: string | null
+  entries: Record<string, WeightEntry>
+}
+
+function metaFile(root: string): string {
   return path.join(root, '.meta', 'weights.json')
 }
 
-function emptyMeta() {
+function emptyMeta(): MemoryMeta {
   return { version: 1, updatedAt: null, entries: {} }
 }
 
-async function ensureMetaDir(root) {
+async function ensureMetaDir(root: string): Promise<void> {
   await fs.mkdir(path.dirname(metaFile(root)), { recursive: true })
 }
 
 /** 加载元数据(不存在则初始化) */
-export async function loadMeta(root) {
+export async function loadMeta(root: string): Promise<MemoryMeta> {
   await ensureMetaDir(root)
   try {
     const raw = await fs.readFile(metaFile(root), 'utf8')
-    const m = JSON.parse(raw)
+    const m = JSON.parse(raw) as MemoryMeta
     if (!m.entries) m.entries = {}
     return m
   } catch {
@@ -44,13 +57,13 @@ export async function loadMeta(root) {
   }
 }
 
-export async function saveMeta(root, meta) {
+export async function saveMeta(root: string, meta: MemoryMeta): Promise<void> {
   meta.updatedAt = new Date().toISOString()
   await ensureMetaDir(root)
   await fs.writeFile(metaFile(root), JSON.stringify(meta, null, 2), 'utf8')
 }
 
-function entryOf(meta, conceptId) {
+function entryOf(meta: MemoryMeta, conceptId: string): WeightEntry {
   if (!meta.entries[conceptId]) {
     meta.entries[conceptId] = { weight: 1.0, accessCount: 0, lastAccessed: null, state: 'active' }
   }
@@ -58,7 +71,7 @@ function entryOf(meta, conceptId) {
 }
 
 /** 交互反馈:用户选中(如 TechChoice 候选被拍板);写锁内串行防权重丢失 */
-export async function recordSelect(root, conceptId, delta = PARAMS.SELECT_DELTA) {
+export async function recordSelect(root: string, conceptId: string, delta: number = PARAMS.SELECT_DELTA): Promise<number> {
   return withLock(async () => {
     const meta = await loadMeta(root)
     const e = entryOf(meta, conceptId)
@@ -72,7 +85,7 @@ export async function recordSelect(root, conceptId, delta = PARAMS.SELECT_DELTA)
 }
 
 /** 交互反馈:用户跳过/否定;写锁内串行防权重丢失 */
-export async function recordSkip(root, conceptId, delta = PARAMS.SKIP_DELTA) {
+export async function recordSkip(root: string, conceptId: string, delta: number = PARAMS.SKIP_DELTA): Promise<number> {
   return withLock(async () => {
     const meta = await loadMeta(root)
     const e = entryOf(meta, conceptId)
@@ -83,17 +96,17 @@ export async function recordSkip(root, conceptId, delta = PARAMS.SKIP_DELTA) {
 }
 
 /** 交互反馈:被唤起且被使用 */
-export async function recordHit(root, conceptId) {
+export async function recordHit(root: string, conceptId: string): Promise<number> {
   return recordSelect(root, conceptId, PARAMS.HIT_DELTA)
 }
 
 /** 巩固:未使用衰减 + 阈值归档(不删除,可复活);写锁内串行 */
-export async function consolidate(root) {
+export async function consolidate(root: string): Promise<MemoryMeta> {
   return withLock(async () => {
     const meta = await loadMeta(root)
     const now = Date.now()
     let changed = false
-    for (const [id, e] of Object.entries(meta.entries)) {
+    for (const e of Object.values(meta.entries)) {
       const days = e.lastAccessed ? (now - new Date(e.lastAccessed).getTime()) / 86400000 : 999
       if (days > PARAMS.DECAY_DAYS) {
         const factor = Math.pow(PARAMS.DECAY_FACTOR, Math.min(days / PARAMS.DECAY_DAYS, 30))
@@ -115,7 +128,7 @@ export async function consolidate(root) {
  * 启动巩固定时器:每 intervalMs 对记忆库做一次巩固(衰减+归档),返回停止函数。
  * 定时器 unref(不阻止进程退出);内部吞异常,单次失败不中断进程。
  */
-export function startConsolidation(root, intervalMs = PARAMS.CONSOLIDATE_INTERVAL_MS) {
+export function startConsolidation(root: string, intervalMs: number = PARAMS.CONSOLIDATE_INTERVAL_MS): () => void {
   const id = setInterval(() => {
     consolidate(root).catch(() => {})
   }, intervalMs)
@@ -125,11 +138,8 @@ export function startConsolidation(root, intervalMs = PARAMS.CONSOLIDATE_INTERVA
 
 /**
  * 唤起评分:relevance × weight × recency_factor。
- * @param {number} relevance 检索相关度(0-5)
- * @param {number} weight 历史权重(含交互反馈)
- * @param {string|null} lastAccessed ISO 时间
  */
-export function recallScore(relevance, weight = 1.0, lastAccessed = null) {
+export function recallScore(relevance: number, weight: number = 1.0, lastAccessed: string | null = null): number {
   let recency = 1.0
   if (lastAccessed) {
     const days = (Date.now() - new Date(lastAccessed).getTime()) / 86400000
@@ -138,8 +148,14 @@ export function recallScore(relevance, weight = 1.0, lastAccessed = null) {
   return relevance * weight * recency
 }
 
+export interface RankableHit {
+  conceptId: string
+  score: number
+  [key: string]: unknown
+}
+
 /** 把检索结果与学习权重合并,按唤起评分排序 */
-export async function rank(root, searchHits) {
+export async function rank<T extends RankableHit>(root: string, searchHits: T[]): Promise<Array<T & { weight: number; state: string; score: number }>> {
   const meta = await loadMeta(root)
   const ranked = searchHits.map((h) => {
     const e = meta.entries[h.conceptId]

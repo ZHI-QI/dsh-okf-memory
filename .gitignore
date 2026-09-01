@@ -5,7 +5,8 @@ node_modules/
 docs/*-演示.html
 docs/*-demo.html
 docs/*-banner.html
-# client 构建产物(由 pnpm run build:client 生成,源码在 src/client/)
-lib/client.js
-lib/client.js.map
+# 构建产物(由 pnpm build 从 src/ 生成,源码即真相;clone 后 pnpm install && pnpm build)
+lib/
+lib/*.js
+lib/*.js.map
 

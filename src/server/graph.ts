@@ -1,31 +1,72 @@
 /**
- * graph.js — 记忆图谱数据提取:把 OKF 记忆库转成图谱 JSON(nodes/edges/timeline)。
+ * graph.ts — 记忆图谱数据提取:把 OKF 记忆库转成图谱 JSON(nodes/edges/timeline)。
  * 供 okf_graph 工具/服务消费,契约与可视化前端一致,可被 dshfind 等复用。
  * 纯业务逻辑,不依赖 dsh ctx,便于单测。
  */
 import { promises as fs } from 'node:fs'
-import { scanBundle } from './store.js'
+import { scanBundle, type BundleEntry } from './store.js'
 import { parseFrontmatter } from './concept.js'
 import { loadMeta } from './learning.js'
 
+export interface GraphMeta {
+  generatedAt: string
+  root: string
+  totalConcepts: number
+}
+
+export interface GraphNode {
+  id: string
+  title: string
+  type: string
+  tags: string[]
+  description: string
+  weight: number
+  state: string
+  lastAccessed: string | null
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+  text: string
+}
+
+export interface GraphTimelineEntry {
+  id: string
+  weight: number
+  state: string
+  lastAccessed: string | null
+  accessCount: number
+}
+
+export interface GraphData {
+  meta: GraphMeta
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  timeline: GraphTimelineEntry[]
+}
+
+export interface BuildGraphOptions {
+  /** 预留:后续可扩展筛选/上限 */
+  limit?: number
+}
+
 /**
  * 提取记忆图谱数据。
- * @param {string} root 记忆库根目录
- * @returns {Promise<{meta:object, nodes:Array, edges:Array, timeline:Array}>}
  */
-export async function buildGraph(root, opts = {}) {
-  const concepts = await scanBundle(root)
+export async function buildGraph(root: string, _opts: BuildGraphOptions = {}): Promise<GraphData> {
+  const concepts: BundleEntry[] = await scanBundle(root)
   const weights = await loadMeta(root)
-  const meta = {
+  const meta: GraphMeta = {
     generatedAt: new Date().toISOString(),
     root,
     totalConcepts: concepts.length,
   }
 
-  const nodes = []
-  const byId = new Map()
+  const nodes: GraphNode[] = []
+  const byId = new Map<string, string>()
   for (const c of concepts) {
-    let text
+    let text: string
     try {
       text = await readText(c.filePath)
     } catch {
@@ -38,7 +79,7 @@ export async function buildGraph(root, opts = {}) {
       id: c.conceptId,
       title: fm.title || c.conceptId.replace(/^[^/]+\//, ''),
       type: fm.type || 'Other',
-      tags: Array.isArray(fm.tags) ? fm.tags : [],
+      tags: Array.isArray(fm.tags) ? (fm.tags as string[]) : [],
       description: fm.description || '',
       weight: w ? +w.weight.toFixed(2) : 1.0,
       state: w?.state || 'active',
@@ -48,10 +89,10 @@ export async function buildGraph(root, opts = {}) {
   }
 
   // 边:交叉链接(用 recall 同款正则,不触发权重反馈)
-  const edges = []
-  const seen = new Set()
+  const edges: GraphEdge[] = []
+  const seen = new Set<string>()
   for (const c of concepts) {
-    let text
+    let text: string
     try {
       text = await readText(c.filePath)
     } catch {
@@ -59,7 +100,7 @@ export async function buildGraph(root, opts = {}) {
     }
     const { body } = parseFrontmatter(text)
     const re = /\[([^\]]+)\]\(\/([^)]+\.md)\)/g
-    let m
+    let m: RegExpExecArray | null
     while ((m = re.exec(body || '')) !== null) {
       let targetId = m[2].replace(/^\/+/, '').replace(/\.md$/, '')
       if (!byId.has(targetId)) {
@@ -77,7 +118,7 @@ export async function buildGraph(root, opts = {}) {
   }
 
   // 时间线(权重历史,供学习热力)
-  const timeline = Object.entries(weights.entries || {}).map(([id, e]) => ({
+  const timeline: GraphTimelineEntry[] = Object.entries(weights.entries || {}).map(([id, e]) => ({
     id,
     weight: +e.weight.toFixed(2),
     state: e.state || 'active',
@@ -89,6 +130,6 @@ export async function buildGraph(root, opts = {}) {
 }
 
 /** 读文件 */
-async function readText(filePath) {
+async function readText(filePath: string): Promise<string> {
   return fs.readFile(filePath, 'utf8')
 }

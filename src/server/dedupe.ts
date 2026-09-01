@@ -1,21 +1,19 @@
 /**
- * dedupe.js — 去重与互补决策(对应"互补而非复制"原则)。
+ * dedupe.ts — 去重与互补决策(对应"互补而非复制"原则)。
  * 写前必查:命中且相同 → skip;命中但互补 → merge 建议 + 交叉链接;未命中 → create。
  */
 import { promises as fs } from 'node:fs'
-import { parseFrontmatter } from './concept.js'
-import { scanBundle, readConcept } from './store.js'
+import { parseFrontmatter, type ConceptMeta } from './concept.js'
+import { scanBundle, readConcept, type BundleEntry } from './store.js'
 
 /**
  * 词项化:空白分词 + CJK 二元组。
  * 纯子串匹配对中文短语(如「查询数据库」)几乎必然落空,而库中概念标题/描述往往写成
  * 「查询鼎赞…数据…」。补重叠二元组后,「查询」「数据」等子片段也能命中,提升中文召回。
  * 保留原始整串词项以维持精确短语加分。
- * @param {string} q 已小写的查询串
- * @returns {string[]}
  */
-function tokenizeQuery(q) {
-  const terms = new Set()
+function tokenizeQuery(q: string): string[] {
+  const terms = new Set<string>()
   const raw = String(q || '').split(/\s+/).filter(Boolean)
   for (const token of raw) {
     terms.add(token)
@@ -27,22 +25,32 @@ function tokenizeQuery(q) {
   return [...terms]
 }
 
+export interface SearchOptions {
+  type?: string
+  tags?: string[]
+  limit?: number
+}
+
+export interface SearchHit {
+  conceptId: string
+  title: string
+  description: string
+  type: string
+  tags: string[]
+  score: number
+}
+
 /**
  * 全库检索:按关键词匹配 title/description/tags/type(正文做二级加分)。
- * @param {string} root
- * @param {string} query 关键词(支持中文短语,内部按空白+二元组分词)
- * @param {{type?: string, tags?: string[], limit?: number}} opts
- * @returns {Promise<Array<{conceptId, title, description, type, tags, score}>>}
  */
-export async function search(root, query, opts = {}) {
+export async function search(root: string, query: string, opts: SearchOptions = {}): Promise<SearchHit[]> {
   const { type, tags, limit = 20 } = opts
   const q = String(query || '').trim().toLowerCase()
-  // 空白分词 + CJK 二元组,缓解中文短语「查询数据库」这类整串子串匹配落空的问题
   const qTerms = tokenizeQuery(q)
   const concepts = await scanBundle(root)
-  const hits = []
+  const hits: SearchHit[] = []
   for (const c of concepts) {
-    let text
+    let text: string
     try {
       text = await fs.readFile(c.filePath, 'utf8')
     } catch {
@@ -52,12 +60,12 @@ export async function search(root, query, opts = {}) {
     if (!meta || !meta.type) continue
     if (type && String(meta.type).toLowerCase() !== String(type).toLowerCase()) continue
     if (tags && tags.length > 0) {
-      const mt = Array.isArray(meta.tags) ? meta.tags.map(String) : []
+      const mt = Array.isArray(meta.tags) ? (meta.tags as string[]).map(String) : []
       if (!tags.every((t) => mt.some((x) => x.toLowerCase().includes(String(t).toLowerCase())))) continue
     }
     let score = 0
     if (qTerms.length > 0) {
-      const hay = [meta.title, meta.description, Array.isArray(meta.tags) ? meta.tags.join(' ') : '', meta.type]
+      const hay = [meta.title, meta.description, Array.isArray(meta.tags) ? (meta.tags as string[]).join(' ') : '', meta.type]
         .filter(Boolean)
         .join(' ').toLowerCase()
       let matched = 0
@@ -69,18 +77,25 @@ export async function search(root, query, opts = {}) {
       score += (matched / qTerms.length) * 2
       if (hay.includes(q)) score += 3 // 完整短语命中加分
     }
-    score += (Array.isArray(meta.tags) ? meta.tags.length : 0) * 0.1
+    score += (Array.isArray(meta.tags) ? (meta.tags as string[]).length : 0) * 0.1
     hits.push({
       conceptId: c.conceptId,
       title: meta.title || c.conceptId,
       description: meta.description || '',
       type: meta.type,
-      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      tags: Array.isArray(meta.tags) ? (meta.tags as string[]) : [],
       score,
     })
   }
   hits.sort((a, b) => b.score - a.score)
   return hits.slice(0, limit)
+}
+
+export interface SimilarHit {
+  conceptId: string
+  title: string
+  type: string
+  similarity: number
 }
 
 /**
@@ -89,13 +104,13 @@ export async function search(root, query, opts = {}) {
  * 会误伤「前端方案」,挡住正常新建。
  */
 const MIN_CONTAIN_LEN = 3
-export async function findSimilarByTitle(root, title, type) {
+export async function findSimilarByTitle(root: string, title: string, type?: string): Promise<SimilarHit[]> {
   const t = String(title || '').trim().toLowerCase()
   if (!t) return []
   const concepts = await scanBundle(root)
-  const out = []
+  const out: SimilarHit[] = []
   for (const c of concepts) {
-    let text
+    let text: string
     try {
       text = await fs.readFile(c.filePath, 'utf8')
     } catch {
@@ -114,11 +129,22 @@ export async function findSimilarByTitle(root, title, type) {
   return out.sort((a, b) => b.similarity - a.similarity)
 }
 
+export interface DecideInput {
+  title: string
+  type?: string
+  body: string
+}
+
+export interface DecideResult {
+  action: 'skip' | 'update' | 'create'
+  conceptId?: string
+  reason: string
+}
+
 /**
  * 去重决策。
- * @returns {{action: 'skip'|'update'|'create', conceptId?: string, reason: string}}
  */
-export async function decide(root, { title, type, body }) {
+export async function decide(root: string, { title, type, body }: DecideInput): Promise<DecideResult> {
   const similar = await findSimilarByTitle(root, title, type)
   if (similar.length > 0) {
     const top = similar[0]
