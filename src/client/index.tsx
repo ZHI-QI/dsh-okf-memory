@@ -131,7 +131,7 @@ function MemoryGraphView() {
       `${graph.nodes.length} 节点 · ${graph.edges.length} 边 · 滚轮缩放 · 拖拽平移 · 悬停查看详情 · 搜索命中→神经传导`),
     React.createElement("canvas", { ref: canvasRef, onWheel, onMouseDown, onMouseMove, onMouseUp, onMouseLeave: () => { hoverRef.current = null; forceRender((x) => x + 1); }, style: { width: "100%", height: "calc(100vh - 200px)", display: "block", cursor: "crosshair" } }),
     hover
-      ? React.createElement("div", { style: { position: "absolute", left: "12px", bottom: "12px", background: "rgba(10,18,28,.95)", border: "1px solid " + (TYPE_COLORS[hover.type] || "#3b5a77"), borderRadius: "8px", padding: "9px 12px", fontSize: "12px", color: "#eaf3fb", maxWidth: "300px", boxShadow: "0 6px 20px rgba(0,0,0,.4)", zIndex: 5 } },
+      ? React.createElement("div", { style: { position: "absolute", top: "54px", right: "12px", background: "rgba(10,18,28,.97)", border: "1px solid " + (TYPE_COLORS[hover.type] || "#3b5a77"), borderRadius: "8px", padding: "9px 12px", fontSize: "12px", color: "#eaf3fb", maxWidth: "320px", boxShadow: "0 6px 20px rgba(0,0,0,.45)", zIndex: 10 } },
           React.createElement("b", null, hover.title), React.createElement("span", { style: { fontSize: "10px", padding: "1px 6px", borderRadius: "8px", background: (TYPE_COLORS[hover.type] || "#66") + "66", color: "#fff", marginLeft: "6px" } }, hover.type),
           React.createElement("div", { style: { color: "#9db8cf", marginTop: "4px" } }, "权重 " + hover.weight + " · " + hover.state),
           hover.description ? React.createElement("div", { style: { color: "#8aa4bd", marginTop: "3px" } }, hover.description) : null,
