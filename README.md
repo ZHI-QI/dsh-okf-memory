@@ -26,17 +26,17 @@
 ## 安装
 
 ```sh
-# 任意 profile(如 web):
+# 任意 profile(如 web):已发布到 npm,一行安装,免构建授权
 dsh plugin --profile web add dsh-okf-memory
-# 或从本地路径:
+# 或从本地 checkout(开发用):
 dsh plugin --profile web add ./dsh-okf-memory
-# 或从 GitHub(拉取源码,需 prepare 构建并向用户授权构建):
+# 或从 GitHub 源码(需 prepare 构建并向用户授权构建):
 dsh plugin --profile web add github:ZHI-QI/dsh-okf-memory
-# 或发布到 npm 后免构建授权安装:
-dsh plugin --profile web add dsh-okf-memory
 ```
 
-插件零运行时依赖(peer 依赖 `@deepseek-ai/cordis` 由 dsh 运行时提供),安装即用,无需构建脚本。
+**已发布到 npm**:`dsh-okf-memory@0.1.0` → https://www.npmjs.com/package/dsh-okf-memory
+
+插件零运行时依赖(peer 依赖 `@deepseek-ai/cordis` 由 dsh 运行时提供,安装时若有 peer 警告可忽略),安装即用,无需构建脚本。
 
 ## 如何使用
 

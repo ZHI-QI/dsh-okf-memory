@@ -24,17 +24,17 @@ Turn high-value content from your conversations into persistent long-term memory
 ## Install
 
 ```sh
-# Any profile (e.g. web):
+# Any profile (e.g. web): published to npm, one-line install, no build approval
 dsh plugin --profile web add dsh-okf-memory
-# Or from a local path:
+# Or from a local checkout (dev):
 dsh plugin --profile web add ./dsh-okf-memory
-# Or from GitHub (pulls source; needs a prepare build + user build approval):
+# Or from GitHub source (needs a prepare build + user build approval):
 dsh plugin --profile web add github:ZHI-QI/dsh-okf-memory
-# Or publish to npm and install without build approval:
-dsh plugin --profile web add dsh-okf-memory
 ```
 
-Zero runtime dependencies (peer dependency `@deepseek-ai/cordis` is provided by the dsh runtime). Install and use — no build step, no build-script approval needed.
+**Published on npm**: `dsh-okf-memory@0.1.0` → https://www.npmjs.com/package/dsh-okf-memory
+
+Zero runtime dependencies (peer dependency `@deepseek-ai/cordis` is provided by the dsh runtime; a peer warning during install can be ignored). Install and use — no build step, no build-script approval needed.
 
 ## How to Use
 
