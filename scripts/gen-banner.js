@@ -53,10 +53,19 @@ canvas{display:block}
 #slogan h1 span{background:linear-gradient(120deg,#7ec3ff,#c04dff);-webkit-background-clip:text;background-clip:text;color:transparent}
 #slogan .sub{font-size:14px;color:#9db8cf;margin-top:8px;line-height:1.7}
 #badge{position:absolute;right:30px;top:26px;z-index:9;font-size:14px;color:#7ec3ff;background:rgba(38,56,76,.5);border:1px solid rgba(120,160,200,.3);border-radius:20px;padding:6px 14px}
+#search{position:absolute;left:28px;top:150px;z-index:9;width:300px;background:rgba(11,22,34,.8);border:1px solid rgba(120,160,200,.45);border-radius:12px;padding:12px 14px;backdrop-filter:blur(4px)}
+#search .lbl{font-size:11px;color:#8aa4bd;margin-bottom:6px;letter-spacing:.5px}
+#search .row{display:flex;align-items:center;gap:8px;background:rgba(20,32,46,.9);border-radius:8px;padding:8px 12px;border:1px solid rgba(120,160,200,.25)}
+#search .mag{font-size:15px;color:#7ec3ff}
+#search .kw{font-size:17px;color:#fff;font-weight:700;min-width:120px}
+#search .caret{width:2px;height:18px;background:#7ec3ff;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
 </style></head><body>
 <div id="wrap"><div id="slogan"><h1>🧠 记忆图谱 <span>· 神经自我学习</span></h1><div class="sub">会话 → 概念化 → 长期记忆 → 自动唤起<br>节点=权重 · 颜色=类型 · 交叉链接成网</div></div>
+<div id="search"><div class="lbl">🔍 搜索命中 · 输入关键词</div><div class="row"><span class="mag">⌕</span><span class="kw" id="kw"></span><span class="caret"></span></div></div>
 <div id="badge">48 概念 · 60 关系</div><canvas id="cv"></canvas></div>
 <script>
+window.onerror=function(m,s,l){var d=document.createElement('div');d.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#c0283c;color:#fff;font:12px monospace;padding:6px;z-index:999;white-space:pre-wrap';d.textContent='JSERR: '+m+' @'+l;document.body.appendChild(d);};
 const NODES=${JSON.stringify(nodes)}, EDGES=${JSON.stringify(edges)}, HIT='${HIT_TITLE}';
 const COL=${JSON.stringify(TYPE_COLORS)};
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
@@ -80,17 +89,23 @@ function draw(){ctx.clearRect(0,0,W,H);
   // 背景网格
   ctx.strokeStyle='rgba(120,160,200,.04)';ctx.lineWidth=1;for(let g=0;g<W;g+=46){ctx.beginPath();ctx.moveTo(g,0);ctx.lineTo(g,H);ctx.stroke();}for(let g=0;g<H;g+=46){ctx.beginPath();ctx.moveTo(0,g);ctx.lineTo(W,g);ctx.stroke();}
   eds.forEach(e=>{const a=byId.get(e.source),b=byId.get(e.target);const on=act.has(e.source)||act.has(e.target);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.strokeStyle=on?'rgba(126,195,255,.4)':'rgba(120,160,200,.16)';ctx.lineWidth=on?1.4:1;ctx.stroke();});
-  const t=performance.now()/700;
+  // 命中词打字机动画:每~120ms 出一个字符,驱动 kw DOM
+  const tNow=performance.now();
+  const typed=Math.max(1,Math.floor((tNow-T0)/120));
+  const kwEl=document.getElementById('kw');if(kwEl)kwEl.textContent=HIT.slice(0,typed);
+  // 命中脉冲相位随打字进度:输入完成时恰有一次扩散
+  const t=tNow/700;
   nds.forEach(o=>{const c=COL[o.type]||COL.Other;const isHit=hitSet.has(o.id),isAct=act.has(o.id);
     if(isHit){const tp=(t+hash(o.id)%10)%1;const pr=o.rr*(1.4+tp*1.7);ctx.beginPath();ctx.arc(o.x,o.y,pr,0,Math.PI*2);ctx.strokeStyle=rgba(c,.8*(1-tp));ctx.lineWidth=2.5;ctx.stroke();}
     if(isHit||isAct){const rg=ctx.createRadialGradient(o.x,o.y,o.rr*.2,o.x,o.y,o.rr*(isHit?3:2.1));rg.addColorStop(0,rgba(c,isHit?.85:.4));rg.addColorStop(1,'transparent');ctx.beginPath();ctx.arc(o.x,o.y,o.rr*(isHit?3:2.1),0,Math.PI*2);ctx.fillStyle=rg;ctx.fill();}
-    ctx.beginPath();ctx.arc(o.x,o.y,o.rr,0,Math.PI*2);ctx.fillStyle=isAct?(isHit?'#fff':c):'#13233a';ctx.globalAlpha=isAct?.96:1;ctx.fill();ctx.globalAlpha=1;
+    ctx.beginPath();ctx.arc(o.x,o.y,o.rr,0,Math.PI*2);ctx.fillStyle=isAct?(isHit?'#fff':c):'#13233a';ctx.globalAlpha=isAct?0.96:1;ctx.fill();ctx.globalAlpha=1;
     ctx.beginPath();ctx.arc(o.x,o.y,o.rr,0,Math.PI*2);ctx.strokeStyle=isHit?'#fff':(isAct?c:'#33506a');ctx.lineWidth=isHit?3.4:1.2;ctx.stroke();
     ctx.fillStyle=isAct?'#fff':'#5f7d97';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.fillText(o.title.slice(0,9),o.x,o.y+o.rr+12);
     if(isHit){ctx.fillStyle='#fff';ctx.font='700 12px sans-serif';ctx.fillText('⚡命中',o.x,o.y-o.rr-10);}
   });
   requestAnimationFrame(draw);}
 function rgba(h,a){const c=h.replace('#','');return 'rgba('+parseInt(c.slice(0,2),16)+','+parseInt(c.slice(2,4),16)+','+parseInt(c.slice(4,6),16)+','+a+')'}
+const T0=performance.now();
 draw();
 </script></body></html>`
 
