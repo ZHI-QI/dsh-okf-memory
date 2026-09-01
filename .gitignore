@@ -4,4 +4,7 @@ node_modules/
 *.tgz
 docs/*-演示.html
 docs/*-demo.html
+# client 构建产物(由 pnpm run build:client 生成,源码在 src/client/)
+lib/client.js
+lib/client.js.map
 
