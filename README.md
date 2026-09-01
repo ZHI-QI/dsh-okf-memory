@@ -8,6 +8,8 @@
 
 **Session-to-OKF memory plugin with neuro-self-learning: predictive recall, uncertainty-driven capture, reinforcement feedback, consolidation & forgetting.**
 
+![记忆图谱 · 神经自我学习](docs/okf-memory-banner.png)
+
 [![dshfind](https://dshfind.com/api/card/ZHI-QI/dsh-okf-memory?lang=zh)](https://dshfind.com/zh/plugins/ZHI-QI/dsh-okf-memory?ref=badge)
 
 ## 特性
@@ -18,7 +20,8 @@
 - **强化反馈回路**:`score = relevance × weight × recency`,用户选中候选权重↑、跳过权重↓
 - **技术选型记忆(TechChoice)**:前端/后端/语言/方案/配置 按维度沉淀候选表 + 当前使用;三档选择规则(多候选展示、单候选直用、领域命中按维度)
 - **写入许可门**:type 合法性 → 去重(互补不复制,互建交叉链接)→ OKF 符合性校验
-- **P1 加固**:frontmatter 解析增强(引号/多行/含逗号 tag)、相似标题短词阈值(「前端」不再误伤「前端方案」)、`index.md` 每行附 description 增强"库里有啥"感知、`service.preload()` 预测性预取接口、4 工具描述中英双语
+- **记忆图谱可视化(M2)**:client 面板在 DSH 对话视图渲染**力导向记忆图谱**——节点大小=权重、颜色=类型;搜索命中→脉冲光环+⚡命中+神经传导;滚轮缩放/拖拽平移/拖节点/悬停详情
+- **图谱数据接口**:`okf_graph` 工具 + `service.graph` 输出 `{nodes,edges,timeline}` JSON,契约稳定,可被任意前端复用
 
 ## 安装
 
@@ -39,7 +42,7 @@ dsh plugin --profile web add dsh-okf-memory
 
 装好后你**无需手敲命令**。插件会给 Agent 注入一段「记忆纪律」系统提示,让它在会话里**自主判断**该记什么、该查什么,并调用下面的工具完成。你也可以随时显式地说「记住XX」或「查一下记忆里关于XX的」来主动触发。
 
-### 4 个工具一览
+### 5 个工具一览
 
 | 工具 | 作用 | 什么时候用 |
 |---|---|---|
@@ -47,6 +50,7 @@ dsh plugin --profile web add dsh-okf-memory
 | `okf_search` | 按关键词召回,按权重/近因排序 | 开场预取、回答前找相关记忆 |
 | `okf_read` | 精读某条全量(含交叉链接),并记录一次使用反馈 | 需要完整细节时 |
 | `okf_forget` | 撤回一条记忆 | 记错 / 不需要时 |
+| `okf_graph` | 导出记忆图谱 JSON(nodes/edges/timeline) | 可视化 / 传递图谱数据 |
 
 ### 让它记住(写入)
 
@@ -87,6 +91,16 @@ Agent: okf_search(query="查询数据库")
        → 命中「鼎赞数据统一用 mcp-dezensaas-mysql」
        → 按该记忆走 mcp-dezensaas-mysql 服务
 ```
+
+## 视觉图谱(DSH 对话视图标签)
+
+插件带有 `client-plugin`,在 DSH web 的对话视图注册一个「**记忆图谱**」标签:
+
+- **力导向图谱**:节点大小=权重、颜色=类型(fact/preference/decision/method/insight/idea/lesson/techchoice)、连线=交叉链接
+- **搜索命中**:顶部输入框命中 title/type/tags → 命中节点白色描边 + 脉冲光环 + `⚡命中`,并 BFS 传导激活相关节点
+- **交互**:滚轮缩放、拖拽平移、拖节点、悬停查看详情(标题/类型/权重/描述/标签)
+
+数据来自后端 `/okf-graph` 路由(webServer,仅 web profile),由 `okf_graph` 工具 / `service.graph` 提供。
 
 ## 记忆库结构
 

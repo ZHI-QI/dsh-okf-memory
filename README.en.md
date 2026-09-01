@@ -6,6 +6,8 @@
 
 Turn high-value content from your conversations into persistent long-term memory, organized as [OKF v0.1](https://github.com/open-knowledge-format) knowledge documents. The agent gets smarter the more you use it — every selection, skip, and correction is a learning signal that updates memory weights.
 
+![Memory Graph · Neuro Self-Learning](docs/okf-memory-banner.png)
+
 [![dshfind](https://dshfind.com/api/card/ZHI-QI/dsh-okf-memory?lang=en)](https://dshfind.com/zh/plugins/ZHI-QI/dsh-okf-memory?ref=badge)
 
 ## Features
@@ -16,7 +18,8 @@ Turn high-value content from your conversations into persistent long-term memory
 - **Reinforcement feedback loop**: `score = relevance × weight × recency`; selecting a candidate raises its weight, skipping lowers it
 - **TechChoice memory**: frontend / backend / language / approach / config — one concept per dimension with an options table + active choice; three-tier selection rule (show all candidates, use the only candidate, or follow the matched dimension)
 - **Write permission gate**: type validity → dedup (complement, never duplicate, cross-link) → OKF compliance check
-- **P1 hardening**: enhanced frontmatter parsing (quotes / multi-line / comma-in-tag), short-title similarity threshold ("前端" no longer blocks "前端方案"), `index.md` rows carry descriptions for better "what's in the library" awareness, `service.preload()` predictive prefetch API, bilingual (zh/en) tool descriptions
+- **Memory graph visualization (M2)**: a client panel renders a force-directed **memory graph** in the DSH conversation view — node size = weight, color = type; search hit → pulse halo + ⚡hit + neural spreading; zoom / pan / drag / hover details
+- **Graph data API**: `okf_graph` tool + `service.graph` produce `{nodes,edges,timeline}` JSON with a stable contract, reusable by any frontend
 
 ## Install
 
@@ -37,7 +40,7 @@ Zero runtime dependencies (peer dependency `@deepseek-ai/cordis` is provided by 
 
 Once installed you don't have to type any commands. The plugin injects a "memory discipline" system prompt that tells the agent to **decide on its own** what to remember and what to look up, using the tools below. You can also trigger it explicitly by saying "remember X" or "check the memory for X".
 
-### The 4 tools
+### The 5 tools
 
 | Tool | What it does | When to use |
 |---|---|---|
@@ -45,6 +48,7 @@ Once installed you don't have to type any commands. The plugin injects a "memory
 | `okf_search` | Keyword recall, ranked by weight/recency | Session-start preload, find relevant memory before answering |
 | `okf_read` | Reads one memory in full (with cross-links), records a usage feedback | When you need complete detail |
 | `okf_forget` | Revokes one memory | When it was wrong / is no longer needed |
+| `okf_graph` | Exports the memory graph JSON (nodes/edges/timeline) | Visualization / handing off graph data |
 
 ### Make it remember (write)
 
@@ -85,6 +89,16 @@ Agent: okf_search(query="查询数据库")
        → hit「鼎赞数据统一用 mcp-dezensaas-mysql」
        → route to the mcp-dezensaas-mysql service
 ```
+
+## Visual Graph (DSH conversation-view tab)
+
+The plugin ships a `client-plugin` that registers a "**Memory Graph**" tab in the DSH web conversation view:
+
+- **Force-directed graph**: node size = weight, color = type (fact/preference/decision/method/insight/idea/lesson/techchoice), lines = cross-links
+- **Search hit**: type in the top box to hit title/type/tags → the hit node gets a white border + pulse halo + `⚡hit`, plus BFS spreading to related nodes
+- **Interaction**: wheel zoom, drag-pan, drag nodes, hover for details (title/type/weight/description/tags)
+
+Data comes from the backend `/okf-graph` route (webServer, web profile only), served by the `okf_graph` tool / `service.graph`.
 
 ## Memory Library Layout
 
