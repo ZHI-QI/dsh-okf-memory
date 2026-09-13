@@ -181,7 +181,8 @@ export async function refreshIndex(root: string): Promise<void> {
   return withLock(async () => {
     const concepts = await scanBundle(root)
     // 并行读每个概念 frontmatter,取 title/description 供 index 展示
-    const metas = await Promise.all(concepts.map(async (c) => {
+    // 显式标注返回类型:否则失败分支的 {} 会让 metas[i].description 报类型错
+    const metas = await Promise.all(concepts.map(async (c): Promise<Partial<ConceptMeta>> => {
       try {
         const text = await fs.readFile(c.filePath, 'utf8')
         const { meta } = parseFrontmatter(text)

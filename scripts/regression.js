@@ -163,6 +163,46 @@ stop()
 const meta2 = await learning.loadMeta(root)
 assert('巩固调度运行后 weights 仍可读', !!meta2.entries)
 
+// ── F2. 巩固正确性回归:幂等 / 宽限期 / 只跳过不读 / 复活不抖动 ──
+// (旧实现三个缺陷:consolidate 非幂等导致反复扣血;lastAccessed=null 被当成无限陈旧
+//  使「只被跳过」的记忆首次巩固就归零归档;复活后权重仍低于归档线导致来回抖动)
+const metaFile = path.join(root, '.meta', 'weights.json')
+const writeWeights = (entries) => fs.writeFile(metaFile, JSON.stringify({ version: 1, updatedAt: null, entries }, null, 2))
+const readWeights = () => fs.readFile(metaFile, 'utf8').then(JSON.parse)
+const daysAgo = (d) => new Date(Date.now() - d * 86400000).toISOString()
+
+// 1) 幂等:时间未流逝时反复巩固不得重复衰减
+await writeWeights({ 'fact/幂等': { weight: 1.0, accessCount: 1, lastAccessed: daysAgo(40), state: 'active' } })
+await learning.consolidate(root)
+const wOnce = (await readWeights()).entries['fact/幂等'].weight
+await learning.consolidate(root)
+await learning.consolidate(root)
+const wThrice = (await readWeights()).entries['fact/幂等'].weight
+assert('40 天确实发生衰减', wOnce < 1.0, String(wOnce))
+assert('consolidate 幂等(连调 3 次 == 1 次)', Math.abs(wOnce - wThrice) < 1e-9, `${wOnce} vs ${wThrice}`)
+
+// 2) 宽限期内(29 天)不衰减
+await writeWeights({ 'fact/宽限内': { weight: 1.0, accessCount: 1, lastAccessed: daysAgo(29), state: 'active' } })
+await learning.consolidate(root)
+assert('宽限期内不衰减', (await readWeights()).entries['fact/宽限内'].weight === 1.0)
+
+// 3) 只被「跳过」、从未被读的记忆不得瞬间归零归档
+await learning.recordSkip(root, 'fact/只跳过过')
+const wAfterSkip = (await readWeights()).entries['fact/只跳过过'].weight
+assert('skip 权重 = 1.0 − 0.5', Math.abs(wAfterSkip - 0.5) < 1e-9, String(wAfterSkip))
+await learning.consolidate(root)
+const eSkip = (await readWeights()).entries['fact/只跳过过']
+assert('只跳过过 → 首次巩固不再衰减(仍 0.5)', Math.abs(eSkip.weight - 0.5) < 1e-9, JSON.stringify(eSkip))
+assert('只跳过过 → 不被归档', eSkip.state === 'active', JSON.stringify(eSkip))
+
+// 4) 复活达到 ARCHIVE_RECOVER,不被下次巩固立刻再归档(okf_read 走的就是 +0.1 这条)
+await writeWeights({ 'fact/已归档': { weight: 0.15, accessCount: 1, lastAccessed: daysAgo(40), state: 'inactive' } })
+await learning.recordHit(root, 'fact/已归档')
+const revived = (await readWeights()).entries['fact/已归档']
+assert('复活权重达 ARCHIVE_RECOVER', revived.weight >= learning.PARAMS.ARCHIVE_RECOVER && revived.state === 'active', JSON.stringify(revived))
+await learning.consolidate(root)
+assert('复活后不被下次巩固再归档', (await readWeights()).entries['fact/已归档'].state === 'active')
+
 // 卸载 dispose 不抛错
 let disposeOk = true
 try { dispose() } catch { disposeOk = false }

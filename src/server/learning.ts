@@ -12,10 +12,13 @@ export const PARAMS = {
   SELECT_DELTA: 1.0,        // 用户选中某候选/概念 → 权重增量
   SKIP_DELTA: 0.5,          // 用户跳过/否定 → 权重减量
   HIT_DELTA: 0.1,           // 被唤起且使用 → 小幅增量
-  DECAY_DAYS: 30,           // 无访问超过 N 天开始明显衰减
-  DECAY_FACTOR: 0.9,        // 每次巩固周期未使用时的衰减系数
+  MIN_WEIGHT: 0.05,         // 权重下限
+  MAX_WEIGHT: 10,           // 权重上限
+  DECAY_DAYS: 30,           // 宽限期:距上次「触摸」(被读 / 入表)未超过 N 天不衰减
+  DECAY_FACTOR: 0.9,        // 每超出宽限期一个 DECAY_DAYS 的衰减系数
+  MAX_DECAY_STEPS: 30,      // 衰减指数上限(防极端天数把权重一步打到地板)
   ARCHIVE_THRESHOLD: 0.3,   // 权重低于该值 → 归档 inactive(不删除,可复活)
-  ARCHIVE_RECOVER: 0.6,     // 归档后再次被唤起命中 → 复活阈值(权重提到该值)
+  ARCHIVE_RECOVER: 0.6,     // 归档后再次被触摸 → 权重至少恢复到该值(防「复活即再归档」抖动)
   CONSOLIDATE_INTERVAL_MS: 24 * 60 * 60 * 1000, // 巩固周期:24h
 } as const
 
@@ -24,6 +27,10 @@ export interface WeightEntry {
   accessCount: number
   lastAccessed: string | null
   state: 'active' | 'inactive'
+  /** 概念首次进入权重表的时间(从未被读取时的衰减基线;旧数据可能缺失) */
+  createdAt?: string
+  /** 上次应用衰减时的「距触摸天数」——用于把衰减做成增量式,保证 consolidate 幂等 */
+  lastDecayDays?: number
 }
 
 export interface MemoryMeta {
@@ -65,9 +72,29 @@ export async function saveMeta(root: string, meta: MemoryMeta): Promise<void> {
 
 function entryOf(meta: MemoryMeta, conceptId: string): WeightEntry {
   if (!meta.entries[conceptId]) {
-    meta.entries[conceptId] = { weight: 1.0, accessCount: 0, lastAccessed: null, state: 'active' }
+    meta.entries[conceptId] = {
+      weight: 1.0, accessCount: 0, lastAccessed: null, state: 'active',
+      // 记下入表时间作为衰减基线 —— 否则「只被跳过、从未被读」的记忆会因为
+      // lastAccessed=null 而被当成无限陈旧,第一次巩固就瞬间衰减+归档
+      createdAt: new Date().toISOString(),
+    }
   }
   return meta.entries[conceptId]
+}
+
+/** 触摸时间基线:读过用 lastAccessed;只入表未读过用 createdAt;两者都缺(旧数据)→ 视为现在(保守,不衰减) */
+function touchedAtMs(e: WeightEntry, now: number): number {
+  const t = e.lastAccessed || e.createdAt
+  if (!t) return now
+  const ms = new Date(t).getTime()
+  return Number.isFinite(ms) ? ms : now
+}
+
+/** 衰减因子:宽限期内为 1;超出后按 (超出天数 / DECAY_DAYS) 做 DECAY_FACTOR 幂衰减 */
+function decayFactor(elapsedDays: number): number {
+  if (elapsedDays <= PARAMS.DECAY_DAYS) return 1
+  const over = (elapsedDays - PARAMS.DECAY_DAYS) / PARAMS.DECAY_DAYS
+  return Math.pow(PARAMS.DECAY_FACTOR, Math.min(over, PARAMS.MAX_DECAY_STEPS))
 }
 
 /** 交互反馈:用户选中(如 TechChoice 候选被拍板);写锁内串行防权重丢失 */
@@ -75,10 +102,17 @@ export async function recordSelect(root: string, conceptId: string, delta: numbe
   return withLock(async () => {
     const meta = await loadMeta(root)
     const e = entryOf(meta, conceptId)
-    e.weight = Math.min(10, e.weight + delta)
+    e.weight = Math.min(PARAMS.MAX_WEIGHT, e.weight + delta)
     e.accessCount += 1
     e.lastAccessed = new Date().toISOString()
-    if (e.state === 'inactive') e.state = 'active'
+    // 触摸后衰减基线归零:下次从宽限期重新起算
+    e.lastDecayDays = 0
+    if (e.state === 'inactive') {
+      // 复活:权重至少抬到 ARCHIVE_RECOVER —— 否则 okf_read 只 +0.1,
+      // 复活后仍低于归档线,下次巩固立刻再归档(来回抖动)
+      e.weight = Math.max(e.weight, PARAMS.ARCHIVE_RECOVER)
+      e.state = 'active'
+    }
     await saveMeta(root, meta)
     return e.weight
   })
@@ -89,7 +123,7 @@ export async function recordSkip(root: string, conceptId: string, delta: number 
   return withLock(async () => {
     const meta = await loadMeta(root)
     const e = entryOf(meta, conceptId)
-    e.weight = Math.max(0.05, e.weight - delta)
+    e.weight = Math.max(PARAMS.MIN_WEIGHT, e.weight - delta)
     await saveMeta(root, meta)
     return e.weight
   })
@@ -100,24 +134,37 @@ export async function recordHit(root: string, conceptId: string): Promise<number
   return recordSelect(root, conceptId, PARAMS.HIT_DELTA)
 }
 
-/** 巩固:未使用衰减 + 阈值归档(不删除,可复活);写锁内串行 */
+/**
+ * 巩固:增量衰减 + 阈值归档(不删除,可复活);写锁内串行。
+ *
+ * 幂等性:衰减按「本次因子 / 上次已应用的因子」增量施加。两次调用之间 elapsedDays
+ * 不变时比值为 1,所以时间没流逝就不会重复扣血 —— 这正是旧实现的问题:
+ * 它每次都把 factor 乘到已衰减的权重上,连调 N 次就衰减 N 次(24h 定时器 + 每次
+ * 重启/reload 多跑一次即反复扣血)。
+ */
 export async function consolidate(root: string): Promise<MemoryMeta> {
   return withLock(async () => {
     const meta = await loadMeta(root)
     const now = Date.now()
     let changed = false
     for (const e of Object.values(meta.entries)) {
-      const days = e.lastAccessed ? (now - new Date(e.lastAccessed).getTime()) / 86400000 : 999
-      if (days > PARAMS.DECAY_DAYS) {
-        const factor = Math.pow(PARAMS.DECAY_FACTOR, Math.min(days / PARAMS.DECAY_DAYS, 30))
-        e.weight = Math.max(0.05, e.weight * factor)
-        changed = true
+      const elapsedDays = (now - touchedAtMs(e, now)) / 86400000
+      if (elapsedDays > PARAMS.DECAY_DAYS) {
+        const prev = typeof e.lastDecayDays === 'number' ? e.lastDecayDays : PARAMS.DECAY_DAYS
+        const ratio = Math.min(1, decayFactor(elapsedDays) / decayFactor(prev))
+        if (ratio < 1) {
+          e.weight = Math.max(PARAMS.MIN_WEIGHT, e.weight * ratio)
+          changed = true
+        }
+        if (e.lastDecayDays !== elapsedDays) {
+          e.lastDecayDays = elapsedDays
+          changed = true
+        }
       }
       if (e.state === 'active' && e.weight < PARAMS.ARCHIVE_THRESHOLD) {
         e.state = 'inactive'
         changed = true
       }
-      // 复活:归档后再次命中由 recordSelect 处理(weight + SELECT_DELTA,state → active)
     }
     if (changed) await saveMeta(root, meta)
     return meta
@@ -148,10 +195,13 @@ export function recallScore(relevance: number, weight: number = 1.0, lastAccesse
   return relevance * weight * recency
 }
 
+/**
+ * 可排序命中项:只要带 conceptId 与 score 即可。
+ * 不要求索引签名 —— 否则 SearchHit 这类具体接口会被判为不可赋值。
+ */
 export interface RankableHit {
   conceptId: string
   score: number
-  [key: string]: unknown
 }
 
 /** 把检索结果与学习权重合并,按唤起评分排序 */
