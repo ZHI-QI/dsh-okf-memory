@@ -28,6 +28,11 @@ export const MEMORY_DISCIPLINE: string = `
 2. 每篇必须:type 非空、title 简洁、description 一句话摘要(检索全靠它)、正文结构化(标题/列表/表格)
 3. type 词表:Fact 背景事实 / Preference 偏好 / Decision 决策 / Method 方法论 / Insight 洞察 / Idea 灵感 / Lesson 教训 / TechChoice 技术选型
 4. 正文模板:Decision/Insight 用 # 数据 → # 分析 → # 结论 三段式;TechChoice 用 # Options 候选表 + # Active 当前使用;其余自由结构化
+5. **交叉链接必须显式传 related 参数**:新建概念时,把 okf_search 命中的相关概念 ID 填进
+   related(如 related: ["fact/门店布局"])。工具会自动双向建立「## 相关」链接。
+   - 正文里手写路径 **不会** 生成图谱边 —— 图谱的边只来自 related 写入的链接。
+   - 一次会话里新建多条互相相关的概念时,后建的必须把先建的 ID 放进 related。
+   - 若 okf_remember 返回 status="linked",说明命中相近概念,用返回的 similarTo 作 related 重新提交(不要重复写正文)。
 
 ## 技术选型三档规则(用户既定协议,硬性执行)
 1. 命中 2+ 候选 → 全部展示给用户选择(带说明/配置/状态),绝不擅自决定
